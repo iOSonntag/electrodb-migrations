@@ -21,7 +21,7 @@ Peer dependencies: `electrodb >= 3.0.0`, `@aws-sdk/client-dynamodb >= 3.0.0`. No
 - [What it does](#what-it-does)
 - [Quick start](#quick-start)
 - [Recommended](#recommended)
-- [Detailed docs](#detailed-docs)
+- [Docs](#docs)
 
 ---
 
@@ -49,6 +49,9 @@ Creates:
 src/migrations/                       # actual migrations (edit these)
 electrodb-migrations.config.ts        # framework configuration
 ```
+
+> **Commit `.electrodb-migrations/`** along with your code.  
+> *Despite being framework-managed, this directory holds the drift snapshots that CI's `validate` gate compares against. See [Recommended → Multi-developer workflow](#4-multi-developer-workflow) for resolving merge conflicts when two branches scaffold a migration in parallel.*
 
 The config is a `.ts` file so you can dynamically set the table name from env vars, SST `Resource` references, etc.
 
@@ -131,7 +134,7 @@ The framework:
 ### 5. Fill in the transform
 
 ```ts
-// migrations/20260501083000-add-status/migration.ts
+// migrations/20260501083000-User-add-status/migration.ts
 import { defineMigration } from 'electrodb-migrations';
 import { User as UserV1 } from './v1.js';
 import { User as UserV2 } from './v2.js';
@@ -150,6 +153,23 @@ export default defineMigration({
 ```
 
 `up` is required, `down` is optional but required for post-finalize rollback.
+
+**Reading related records during the transform.** Both `up` and `down` receive a second arg `ctx`. Use `ctx.entity(SomeEntity)` to read related records — never your app's regular entity imports, which route through the [guard wrapper](#1-wrap-your-dynamodb-client-with-the-migration-guard) and will throw during a migration.
+
+```ts
+import { Team } from '../../entities/team.js';
+
+// inside defineMigration({...}):
+up: async (user, ctx) => {
+  const team = await ctx.entity(Team).get({ id: user.teamId }).go();
+  return { ...user, teamName: team.data.name };
+},
+```
+
+Reads only — writes through `ctx` throw. Reading the entity currently being migrated (`ctx.entity(User)` from inside a User migration) also throws: the on-disk state is mid-flight and reads would be order-dependent.
+
+> **⚠ Highly discouraged unless you actually need it.**  
+> *Every read fires once per record, serially. A migration over a million rows that does one extra read per row issues a million extra `GetItem` calls — dramatically slowing the run and extending the lock window. Prefer denormalizing the value differently, or pre-loading the lookup data into memory in your runner before calling `apply`. See [Recommended → Reading from other entities](#6-reading-from-other-entities-during-a-migration) for the ordering rule that keeps these reads safe.*
 
 ### 6. Apply
 
@@ -206,21 +226,18 @@ The quick start gets you running. But it is highly recommended to apply the foll
 While a migration is running, has failed, or is in release mode, you do **not** want app traffic hitting the database. Data consistency is not guaranteed during these states — there is no live caching of database writes in the current version, meaning the migration **has** downtime.
 
 > **Note:**  
-> *Zero downtime might be possible in the future, see [Future plans](#future-plans).*
+> *Zero downtime might be possible in the future, see [Future plans](#14-future-plans).*
 
-The guard wrapper is a thin DynamoDB client wrapper that intercepts every call and throws `MigrationInProgressError` instead of going to the wire.
+The guard wrapper is a thin DynamoDB client wrapper that intercepts every call and throws `EDBMigrationInProgressError` instead of going to the wire.
 
 ```ts
-import { wrapClientWithMigrationGuard, createMigrationsClient } from 'electrodb-migrations';
+import { createMigrationsClient } from 'electrodb-migrations';
 
 const client = new DynamoDBClient(...); // OR DynamoDBDocumentClient
 
-const migrate = createMigrationsClient({ client: client, table });
+const migrate = createMigrationsClient({ client, table });
 
-const guarded = wrapClientWithMigrationGuard({
-  client: client,
-  migrationsClient: migrate,
-});
+const guarded = migrate.guardedClient();
 
 // Use `guarded` for every Entity (and Service) in your app:
 const User = new Entity(userSchema, { client: guarded, table });
@@ -230,7 +247,31 @@ The migration runner uses the unwrapped client and keeps working while the wrapp
 
 > **Why is caching for five seconds safe?**  
 > *The migration runner first acquires the lock and then waits 15 seconds before starting the actual migration.  
-> All those settings can be configured, see [detailed docs](#detailed-docs) for more info.*
+> All those settings can be configured, see [docs](#docs) for more info.*
+
+> **Important Note:**  
+>*If you already shipped production code and are adopting the framework, make sure to deploy the guard wrapper before you run your first `apply`. Otherwise, if you run `apply` without the guard in place, there is a window where the migration is running but app traffic is not blocked, which can lead to silent corruption.*
+
+#### Handling `EDBMigrationInProgressError` in your app
+
+When the wrapper fires, every guarded call throws `EDBMigrationInProgressError`. The recommended pattern is to surface it as HTTP 503 with `Retry-After` so load balancers and HTTP clients back off automatically:
+
+```ts
+import { isMigrationInProgress } from 'electrodb-migrations';
+
+// Example: Express error middleware. Adapt to your HTTP framework.
+app.use((err, req, res, next) => {
+  if (isMigrationInProgress(err)) {
+    res.set('Retry-After', '30'); // pick a value that fits your expected migration runtime
+    return res.status(503).json({ error: 'Migration in progress' });
+  }
+  next(err);
+});
+```
+
+`isMigrationInProgress(err)` is a duck-typed checker; prefer it over `instanceof EDBMigrationInProgressError`, which is fragile under dual ESM/CJS. The thrown error's `details` field carries lock metadata (the current `runId`, the lock state) if you want to log it.
+
+The framework deliberately does **not** prescribe a `Retry-After` value — your migration's expected runtime is your call.
 
 ### 2. Block bad merges in CI
 
@@ -247,7 +288,10 @@ It checks:
 - Whether there is a migration scaffolded for that drift.
 - Whether the entity version is in sync with the migrations version.
 - Whether the migrations start at version 1 and increment by 1 for each migration (no resets or skips).
-    - If you deleted older migrations that are no longer needed, you have to specify the starting version in the config per entity, e.g. `User: 5` if your latest migration for User is v5. More on that in the [detailed docs](#detailed-docs).
+    - If you deleted older migrations that are no longer needed, you have to specify the starting version in the config per entity, e.g. `User: 5` if your latest migration for User is v5. More on that in the [docs](#docs).
+- Whether two migrations claim the same `from` version of an entity (parallel-branch collision — see [Multi-developer workflow](#4-multi-developer-workflow)).
+- Whether any migration's declared `reads` target has a later-sequenced pending migration (cross-entity ordering — see [Reading from other entities](#6-reading-from-other-entities-during-a-migration)).
+- Whether any entity that previously existed has been removed from `src/entities/`. The framework does not ship destructive migrations in v0.1; if the removal is intentional, see [Retiring entities](#7-retiring-entities).
 
 ### 3. Performance - running migration on AWS
 Per quickstart the framework runs locally (e.g. CI). But the framework is designed to run migrations on AWS. This is especially useful for large datasets that would take a long time to migrate locally.
@@ -294,9 +338,134 @@ If you now run `npx electrodb-migrations apply --remote`, the framework will sen
 #### 3.2 Long-running server approach
 For long-running migrations that exceed Lambda's limits, you can run the framework inside a long-running Node process on an EC2 instance or a container in ECS/EKS. The framework does not provide a server implementation, but you can easily build one using the migrations client. See [detailed docs](#3-running-on-a-long-running-migration-server) for more information.
 
+### 4. Multi-developer workflow
+
+`.electrodb-migrations/` is committed (per [step 1](#1-initialize)). That gives CI the history it needs to detect drift, but it also means parallel branches that both scaffold a migration on the same entity will collide.
+
+**The collision.** Branches A and B are open at the same time, and both scaffold a User migration:
+
+- Branch A: `20260501-User-add-status` — claims User v1 → v2.
+- Branch B: `20260502-User-add-tier` — also claims User v1 → v2.
+
+Each migration folder ships a frozen `v1.ts` (the pre-migration shape) and `v2.ts` (the target shape). When A merges to main, the snapshot in `.electrodb-migrations/` advances to A's User v2. Branch B is now broken in three ways simultaneously:
+
+- B's migration folder claims to start from User v1, but main's User is at v2.
+- B's `v1.ts` no longer matches the new "previous" shape (which is A's v2).
+- B's `up()` was written assuming the v1 input shape.
+
+CI's [`validate` gate](#2-block-bad-merges-in-ci) catches this before merge — but you still have to fix B before it can land.
+
+**The fix.**
+
+1. Rebase the later branch on main.
+2. Re-frame the migration to the new starting point:
+   ```sh
+   npx electrodb-migrations create --regenerate 20260502-User-add-tier
+   ```
+   The framework keeps your `up()` and `down()` code, rewrites `v1.ts` and `v2.ts` to match the new "previous" shape and the current entity, and prints the new diff.
+3. Review the diff and update `up()` if the underlying transform changed (often it didn't — you're just reapplying the same incremental change on top of the new baseline).
+4. Commit and push. B now claims User v2 → v3 with internally consistent frozen schemas.
+
+> **Note:**  
+> *The same workflow applies to slow-merging PRs and long-lived branches: any time main moves on after you've scaffolded, run `--regenerate` before requesting another review.*
+
+### 5. Test your migrations
+
+A migration's `up()` is the only chance you get to transform every existing record correctly. Validate it before you ever run `apply` against production.
+
+The framework ships a unit-test harness at `electrodb-migrations/testing`:
+
+```ts
+import { testMigration } from 'electrodb-migrations/testing';
+import migration from './migration.js';
+
+testMigration(migration, [
+  { input: { id: '1', email: 'a@b' }, expectedV2: { id: '1', email: 'a@b', status: 'active' } },
+  { roundTrip: { id: '1', email: 'a@b' } }, // exercises `down` and steers you toward writing one
+]);
+```
+
+Output of `up()` is validated against v2's ElectroDB schema automatically, so a mismatched-shape transform fails the test even if you forgot to assert the offending field. Round-trip cases additionally exercise `down`, which is the cheapest way to make sure post-finalize rollbacks are actually possible.
+
+See [Docs → Testing migrations](#8-testing-migrations) for the full case-shape catalog and the rollback-resolver harness.
+
+### 6. Reading from other entities during a migration
+
+`up()` and `down()` receive a `ctx` argument (see [step 5](#5-fill-in-the-transform)). Through it you can read related records via `ctx.entity(Other)` — bound to the migration runner's unguarded client so it works while the lock is held. **Don't reach for this lightly.**
+
+> **⚠ Discouraged by default — every read multiplies your migration runtime.**  
+> *Reads inside `up()`/`down()` fire once per record, serially against your migration's throughput budget. Over a million-row table, one extra read per row is a million extra `GetItem` calls before the migration can finish — and the lock stays held the whole time. Almost always faster: denormalize differently, or pre-load the lookup table into memory in your runner before invoking `apply`.*
+
+#### 6.1 Cross-entity ordering rule
+
+When migration `M` reads entity `Y` via `ctx.entity(Y)`, the on-disk shape of `Y` must match the source `Y` you imported. That holds iff every pending migration on `Y` is sequenced *before* `M`. If `Y` has any migration sequenced after `M`, on-disk `Y` is still at an older shape and the read would silently mis-deserialize.
+
+#### 6.2 Declare what you read
+
+Add a `reads` field to `defineMigration` listing every entity the transform touches via `ctx.entity()`:
+
+```ts
+import { Team } from '../../entities/team.js';
+
+defineMigration({
+  entityName: 'User',
+  from: UserV1,
+  to: UserV2,
+  reads: [Team],
+  up: async (user, ctx) => {
+    const team = await ctx.entity(Team).get({ id: user.teamId }).go();
+    return { ...user, teamName: team.data.name };
+  },
+});
+```
+
+The framework uses `reads` for two things:
+
+- **CI gate.** [`validate`](#2-block-bad-merges-in-ci) refuses any branch where a declared `reads` target has a later-sequenced pending migration. The error names both migrations and points at the fix.
+- **Rollback ordering.** Rolling back `M` is refused if any migration on a `reads` target has been applied since `M`; those must be rolled back first. The head rule already enforces this within a single entity; `reads` extends it across entities.
+
+#### 6.3 Runtime guard (the safety net)
+
+Even without `reads` declared, `ctx.entity(Y)` checks at call time that on-disk `Y` matches the imported source. On mismatch it throws `EDBStaleEntityReadError` *before* hitting DynamoDB, naming the conflicting migration. The same call also throws `EDBSelfReadInMigrationError` if you try to read the entity currently being migrated.
+
+The runtime guard catches forgotten declarations; the `reads` declaration catches the same problem at PR review time, before a production apply. Use both.
+
+#### 6.4 Resolving a conflict
+
+When `validate` flags a cross-entity ordering conflict, you have three options:
+
+1. **Re-timestamp** so the read target's migration runs first.
+2. **Combine** both changes into a single migration if they're tightly coupled.
+3. **Stop denormalizing** across that boundary — compute the value a different way that doesn't require the cross-entity read.
+
+### 7. Retiring entities
+
+The framework intentionally does **not** ship "delete this entity's data" migrations in v0.1. Every other migration kind preserves a recovery path — `down()` reconstructs v1, or pre-finalize rollback restores from v1 records still on disk. A destructive migration cannot offer that: once finalized, the data is gone and only an out-of-band DynamoDB backup can bring it back. Until v0.2 designs that flow with explicit guards, data deletion is treated as the operator's responsibility.
+
+#### 7.1 What happens when you remove an entity
+
+Removing an entity file from `src/entities/` triggers a distinct drift kind: **`entity-removed`**. [`validate`](#2-block-bad-merges-in-ci) reports it explicitly rather than passing silently or scaffolding a destructive migration. CI fails until you decide what to do with the data.
+
+#### 7.2 Acknowledging the removal
+
+If the entity is being retired and you've handled the data separately (one-off cleanup script, TTL-based expiry, or you're keeping the records in place for now), tell the framework to advance the snapshot:
+
+```sh
+npx electrodb-migrations acknowledge-removal User
+```
+
+This updates the framework's internal snapshot to record that User is intentionally gone. It does **not** touch any data on disk. After running it, `validate` passes.
+
+> **What this command will not do for you.**  
+> *It will not delete records, will not check whether records still exist, and will not coordinate the removal with the migration lock. If you want existing rows gone, write and run that cleanup yourself before or after acknowledging.*
+
+#### 7.3 What v0.2 will offer
+
+A first-class entity-deletion migration with the same lock, audit, and pre-finalize rollback guarantees as transform migrations — plus an optional archive hook for the common "copy to a separate entity before deleting" pattern. See [Future plans → Entity deletion migrations](#144-entity-deletion-migrations).
+
 ---
 
-## Detailed docs
+## Docs
 
 Deep dives on the parts of the framework you don't need on day one.
 
@@ -423,15 +592,15 @@ Invoked with `--strategy custom`. The framework refuses at start time if `rollba
 
 The v1 records are already gone, so every v2 record is effectively Type B. Only `projected` is sensible — `snapshot` has nothing to keep, `fill-only` has nothing to fall back to. The framework refuses both on a finalized migration.
 
-`down` is **required**; without it the framework throws `RollbackNotPossibleError({ reason: 'no-down-fn' })`. `--strategy custom` is permitted if a `rollbackResolver` is defined; the resolver will only ever see `kind: 'B'` in this case.
+`down` is **required**; without it the framework throws `EDBRollbackNotPossibleError({ reason: 'no-down-fn' })`. `--strategy custom` is permitted if a `rollbackResolver` is defined; the resolver will only ever see `kind: 'B'` in this case.
 
 #### 2.4 Refusal cases
 
-- A newer applied migration exists for the same entity → `RollbackOutOfOrderError`.
+- A newer applied migration exists for the same entity → `EDBRollbackOutOfOrderError`.
 - The migration is `pending` or already `reverted` → friendly no-op message.
-- `--strategy projected` or `fill-only` without `down` defined → `RollbackNotPossibleError({ reason: 'no-down-fn' })`.
-- `--strategy custom` without `rollbackResolver` defined → `RollbackNotPossibleError({ reason: 'no-resolver' })`.
-- `--strategy snapshot` or `fill-only` on a finalized migration → `RollbackNotPossibleError({ reason: 'finalized-only-projected' })`.
+- `--strategy projected` or `fill-only` without `down` defined → `EDBRollbackNotPossibleError({ reason: 'no-down-fn' })`.
+- `--strategy custom` without `rollbackResolver` defined → `EDBRollbackNotPossibleError({ reason: 'no-resolver' })`.
+- `--strategy snapshot` or `fill-only` on a finalized migration → `EDBRollbackNotPossibleError({ reason: 'finalized-only-projected' })`.
 
 > **Note:**  
 > *If you have multiple unfinalized migrations stacked on top of each other, each one carries its own gap window from when it was released. The head rule keeps each rollback to one decision at a time — the framework does not cascade.*
@@ -483,12 +652,12 @@ await migrate.release();                                           // returns { 
 
 Blocking variants (`migrate.apply()`, `migrate.rollback(id)`, `migrate.finalize(id)`) are still available — the local CLI uses them directly. Use them when you control the caller and don't need a status channel.
 
-Errors thrown by these methods are instances of `ElectroDBMigrationError`. The most common ones to surface to the caller:
+Errors thrown by these methods are instances of `EDBMigrationError`. The most common ones to surface to the caller:
 
-- `MigrationLockHeldError` — another runner holds the lock.
-- `RequiresRollbackError` — a previous `apply` failed mid-run; the head migration must be rolled back before any new `apply`.
-- `RollbackNotPossibleError` — `down` is missing in a case that requires it (see [Detailed docs → Rollback](#2-rollback)).
-- `RollbackOutOfOrderError` — the requested migration is not the head.
+- `EDBMigrationLockHeldError` — another runner holds the lock.
+- `EDBRequiresRollbackError` — a previous `apply` failed mid-run; the head migration must be rolled back before any new `apply`.
+- `EDBRollbackNotPossibleError` — `down` is missing in a case that requires it (see [Detailed docs → Rollback](#2-rollback)).
+- `EDBRollbackOutOfOrderError` — the requested migration is not the head.
 
 Errors are split into two categories: **start errors** (validation, lock held, no migrations to run) are thrown synchronously by `runInBackground` before a `runId` is issued. **Run errors** (failures during execution) surface on the snapshot returned by `getRunStatus` as `{ status: 'failed', error: { code, message, details } }`.
 
@@ -531,7 +700,7 @@ Status response shape:
     "elapsedMs": 30000
   },
   "result": { "applied": ["20260501083000-User-add-status"] },
-  "error": { "code": "RollbackNotPossibleError", "message": "...", "details": { } }
+  "error": { "code": "EDBRollbackNotPossibleError", "message": "...", "details": { } }
 }
 ```
 
@@ -540,7 +709,7 @@ Status response shape:
 If a `start` request fails before a run is registered (lock held, validation error, no migrations to run), the response is the synchronous error shape — no `runId` is issued:
 
 ```json
-{ "error": { "code": "MigrationLockHeldError", "message": "...", "details": { } } }
+{ "error": { "code": "EDBMigrationLockHeldError", "message": "...", "details": { } } }
 ```
 
 Your handler validates the api key, switches on `command`, and routes to `migrate.runInBackground(...)` for the async commands or `migrate.getRunStatus(...)` for `status`. The framework deliberately does not prescribe Express, Fastify, or Koa — pick what fits your stack.
@@ -550,5 +719,218 @@ Your handler validates the api key, switches on `command`, and routes to `migrat
 The process must stay up for the duration of an `apply` or `rollback`. The framework holds the lock with periodic heartbeats; if the process dies mid-run, the lock falls back to its stale-takeover threshold (a few hours by default) before another runner can take over. Configure the heartbeat interval and stale threshold in `electrodb-migrations.config.ts`.
 
 If a task dies mid-migration and you don't want to wait out the stale-takeover threshold, the CLI's `unlock` command clears the lock and marks any in-progress migration as `failed`. Read its full docs before reaching for it — used incorrectly, it will corrupt migration state.
+
+### 4. CLI
+
+#### 4.1 Global options
+
+#### 4.2 init
+
+#### 4.3 baseline
+
+#### 4.4 create
+
+#### 4.5 apply
+
+#### 4.6 release
+
+#### 4.7 finalize
+
+#### 4.8 rollback
+
+#### 4.9 status
+
+#### 4.10 unlock
+
+#### 4.11 validate
+
+#### 4.12 acknowledge-removal
+
+### 5. Configuration reference
+
+#### 5.1 The config file
+
+#### 5.2 Config file resolution and lookup order
+
+### 6. Migration definition reference
+
+#### 6.1 up
+
+#### 6.2 down
+
+#### 6.3 rollbackResolver
+
+#### 6.4 Behavior-only changes (and when to use --force)
+
+#### 6.5 reads
+
+### 7. Programmatic API
+
+#### 7.1 createMigrationsClient
+
+#### 7.2 Client methods
+
+##### 7.2.1 apply
+
+##### 7.2.2 rollback
+
+##### 7.2.3 finalize
+
+##### 7.2.4 release
+
+##### 7.2.5 runInBackground
+
+##### 7.2.6 getRunStatus
+
+##### 7.2.7 forceUnlock
+
+##### 7.2.8 getLockState
+
+##### 7.2.9 getGuardState
+
+##### 7.2.10 guardedClient
+
+#### 7.3 createLambdaMigrationHandler
+
+#### 7.4 defineConfig
+
+#### 7.5 defineMigration
+
+### 8. Testing migrations
+
+Migrations are exactly the code you most want tested before running against production. The framework ships a small unit-test harness at `electrodb-migrations/testing` that exercises `up`, `down`, and `rollbackResolver` without needing a live DynamoDB.
+
+#### 8.1 testMigration
+
+```ts
+import { testMigration } from 'electrodb-migrations/testing';
+import migration from './migration.js';
+
+testMigration(migration, [
+  { input: { id: '1', email: 'a@b' }, expectedV2: { id: '1', email: 'a@b', status: 'active' } },
+  { roundTrip: { id: '1', email: 'a@b' } },
+  { input: { id: '1', email: 'a@b' }, expectedV2: 'valid' },
+]);
+```
+
+Types for `input`, `expectedV2`, and `roundTrip` are inferred from `migration.from` and `migration.to` — same pattern ElectroDB uses for entity types — so you get autocomplete on every field.
+
+##### 8.1.1 Forward transform — `{ input, expectedV2 }`
+
+Asserts `up(input)` deep-equals `expectedV2`. The output is also validated against v2's ElectroDB schema, so a mismatched-shape `up()` fails the test even if you didn't assert the offending field.
+
+##### 8.1.2 Round-trip — `{ roundTrip }`
+
+Asserts `down(up(x))` deep-equals `x`. Requires `down` to be defined on the migration. Both directions are schema-validated. This is the cheapest way to make sure post-finalize rollback is actually possible.
+
+##### 8.1.3 Schema-only — `{ input, expectedV2: 'valid' }`
+
+Asserts `up(input)` produces a record valid against v2's schema, without specifying exact values. Use for non-deterministic transforms (e.g. `id: crypto.randomUUID()`).
+
+#### 8.2 testRollbackResolver
+
+```ts
+import { testRollbackResolver } from 'electrodb-migrations/testing';
+
+testRollbackResolver(migration, [
+  { kind: 'A', v1Original: {...}, v2: {...}, expected: {...} },
+  { kind: 'B', v2: {...}, expected: {...} },
+  { kind: 'C', v1Original: {...}, expected: null },
+]);
+```
+
+Each case calls `migration.rollbackResolver(...)` with the supplied `kind`, `v1Original`, and `v2`, and asserts the return value deep-equals `expected`. `expected: null` asserts the resolver chose to delete the primary key. Output is schema-validated against v1.
+
+The harness throws at start if `rollbackResolver` isn't defined on the migration.
+
+#### 8.3 Test-runner integration
+
+Both functions are framework-agnostic — they throw on the first failure and return normally on success. Wrap each call in your runner's `it()` (or equivalent) for proper reporting:
+
+```ts
+import { describe, it } from 'vitest';
+
+describe('add-status migration', () => {
+  it('passes all cases', () => testMigration(migration, [/* ... */]));
+});
+```
+
+### 9. Errors
+
+#### 9.1 EDBMigrationError (base)
+
+#### 9.2 EDBMigrationLockHeldError
+
+#### 9.3 EDBMigrationInProgressError
+
+Thrown by the [migration guard](#1-wrap-your-dynamodb-client-with-the-migration-guard) when the app tries to read or write while the lock is held. See the linked section for the recommended 503 + `Retry-After` handling pattern and the `isMigrationInProgress(err)` helper.
+
+#### 9.4 EDBRequiresRollbackError
+
+#### 9.5 EDBRollbackNotPossibleError
+
+#### 9.6 EDBRollbackOutOfOrderError
+
+#### 9.7 EDBStaleEntityReadError
+
+#### 9.8 EDBSelfReadInMigrationError
+
+#### 9.9 Reason codes
+
+### 10. Drift detection
+
+#### 10.1 What counts as drift
+
+#### 10.2 What does NOT count as drift (behavior-only changes)
+
+#### 10.3 Snapshot storage layout
+
+#### 10.4 Snapshot lifecycle
+
+#### 10.5 Forcing a migration when no drift is detected
+
+### 11. Lock and runtime internals
+
+#### 11.1 The _migration_lock entity
+
+#### 11.2 The _migrations entity (state log)
+
+#### 11.3 Heartbeat and stale takeover
+
+#### 11.4 The acquire algorithm (conditional-write + verify)
+
+#### 11.5 Pre-migration wait window
+
+#### 11.6 runId tracking
+
+### 12. Migration state machine
+
+#### 12.1 States (pending / applied / finalized / failed / reverted)
+
+#### 12.2 Transitions
+
+#### 12.3 Failed migrations and required rollbacks
+
+#### 12.4 Reverted is terminal
+
+### 13. Multi-entity tables
+
+#### 13.1 Single-table design implications
+
+#### 13.2 Why locks are table-wide today
+
+#### 13.3 Per-entity migration ordering
+
+### 14. Future plans
+
+#### 14.1 Per-entity lock scoping
+
+#### 14.2 Zero-downtime apply
+
+#### 14.3 Additional remote transports
+
+#### 14.4 Entity deletion migrations
+
+#### 14.5 Other ideas
 
 ---
