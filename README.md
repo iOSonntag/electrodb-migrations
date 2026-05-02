@@ -27,7 +27,7 @@ Peer dependencies: `electrodb >= 3.0.0`, `@aws-sdk/client-dynamodb >= 3.0.0`. No
 
 ## What it does
 
-You keep a single source-of-truth entity file (e.g. `src/entities/user.ts`). When you change its shape, the framework detects the drift, scaffolds a migration folder with frozen v1/v2 snapshots and a transform stub, and walks the table converting v1 records to v2 records under a global lock. After a bake window where v1 and v2 coexist, you finalize and v1 is deleted.
+You keep a single source-of-truth entity file (e.g. `src/database/entities/user.ts`). When you change its shape, the framework detects the drift, scaffolds a migration folder with frozen v1/v2 snapshots and a transform stub, and walks the table converting v1 records to v2 records under a global lock. After a bake window where v1 and v2 coexist, you finalize and v1 is deleted.
 
 ---
 
@@ -46,7 +46,7 @@ Creates:
 
 ```
 .electrodb-migrations/                # framework-managed state (do not edit or delete)
-src/migrations/                       # actual migrations (edit these)
+src/database/migrations/              # actual migrations (edit these)
 electrodb-migrations.config.ts        # framework configuration
 ```
 
@@ -59,16 +59,16 @@ The config is a `.ts` file so you can dynamically set the table name from env va
 // electrodb-migrations.config.ts
 import { defineConfig } from 'electrodb-migrations';
 
+// Every option below is optional. `init` generates this file pre-populated with sensible defaults.
 export default defineConfig({
-  entities: 'src/entities',         // scanned recursively - pass a list for explicit control
-  // optional:
-  table: 'app-table',
-  migrations: 'src/migrations',
-  keyFields: { pk: 'pk', sk: 'sk' }, // override if your table's primary-key attributes are not 'pk' / 'sk'
+  entities: 'src/database/entities',                // pass a list for explicit control
+  migrations: 'src/database/migrations',
+  tableName: 'app-table',                           // or pass via --table / runtime arg
+  keyNames: { partitionKey: 'pk', sortKey: 'sk' },  // override if your table's primary-key attributes are renamed
 });
 ```
 
-> *Also supports config file extensions: `.js`, `.mjs`, `.cjs`, `.json`.*
+> *Other supported extensions and the full option list live in [§5.1](#51-the-config-file).*
 
 
 ### 2. Baseline an existing project
@@ -84,7 +84,7 @@ This writes one snapshot per entity into the framework's internal state without 
 ### 3. Edit your entity
 
 ```ts
-// src/entities/user.ts
+// src/database/entities/user.ts
 import { Entity } from 'electrodb';
 
 export const User = new Entity({
@@ -123,7 +123,7 @@ The framework:
    └── migration.ts       # actual migration with an up() stub for you to fill in
    ```
 
-2. Bumps `model.version: '1'` → `model.version: '2'` in `src/entities/user.ts` (the *only* edit it makes to your source).
+2. Bumps `model.version: '1'` → `model.version: '2'` in `src/database/entities/user.ts` (the *only* edit it makes to your source).
 3. Updates its internal snapshot.
 4. Prints the schema diff so you know what `up()` needs to handle:
 
@@ -141,7 +141,7 @@ import { User as UserV1 } from './v1.js';
 import { User as UserV2 } from './v2.js';
 
 export default defineMigration({
-  id: '20260501083000-add-status',
+  id: '20260501083000-User-add-status',
   entityName: 'User',
   from: UserV1,
   to: UserV2,
@@ -186,7 +186,7 @@ import { createMigrationsClient } from 'electrodb-migrations';
 
 const client = new DynamoDBClient(...); // OR DynamoDBDocumentClient
 
-const migrate = createMigrationsClient({ client, table });
+const migrate = createMigrationsClient({ config, client });
 
 const guarded = migrate.guardedClient();
 
@@ -197,8 +197,7 @@ const User = new Entity(userSchema, { client: guarded, table });
 The migration runner uses the unwrapped client and keeps working while the wrapper rejects app traffic. Cost is one cached `GetItem` per five seconds per process at most — negligible compared to silent corruption from a stale schema reading new-format data.
 
 > **Why is caching for five seconds safe?**  
-> *The migration runner first acquires the lock and then waits 15 seconds before starting the actual migration.  
-> All those settings can be configured, see [docs](#docs) for more info.*
+> *The migration runner first acquires the lock and then waits 15 seconds before starting the actual migration. See [§5.3](#53-lock-and-guard-timing-safety-invariant) for the safety invariant; both intervals are configurable in [§5.1](#51-the-config-file).*
 
 > **Important Note:**  
 >*If you already shipped production code and are adopting the framework, make sure to deploy the guard wrapper before you run your first `apply`. Otherwise, if you run `apply` without the guard in place, there is a window where the migration is running but app traffic is not blocked, which can lead to silent corruption.*
@@ -235,13 +234,13 @@ What happens:
 - Acquires the **migration lock** on the table — blocks concurrent migration runners and, if you've wired the guard wrapper, app traffic too.
 - Scans v1 records, runs your `up()` against each, writes v2 records alongside.
 - Both versions coexist on disk. ElectroDB's identity stamps mean v1 reads see only v1, v2 reads see only v2.
-- On success, marks the migration `applied` and transitions the lock to **release mode** — still gates traffic, until you call `release` after deploying your new code.
+- On success, marks the migration `applied` and transitions the lock to **release mode** — still gates app traffic until you call `release` after deploying your new code, but does **not** gate the migration runner itself.
 
 > **Note:**  
-> *Multiple migrations will be applied in sequence, each acquiring and releasing the lock as needed.*
+> *Multiple pending migrations are applied back-to-back in a single `apply` invocation. The release-mode handoff between them is internal to the runner — the next pending migration re-enters migration mode immediately, without a manual `release` in between. App traffic stays gated continuously from the first migration's start until you call `release` after deploying your new code.*
 
 > **Want details on the lock?**  
-> *See [Detailed docs → Locks](#1-locks-migration-and-release-modes) for the full state machine and why the release-mode handoff exists.*
+> *See [Docs → Locks](#1-locks-migration-release-and-maintenance-modes) for the full state machine and why the release-mode handoff exists.*
 
 
 ### 8. Deploy your code, then release
@@ -265,6 +264,8 @@ npx electrodb-migrations finalize --all
 ```
 
 Deletes the v1 records. Marks the migration `finalized`. Permanent.
+
+`finalize` acquires the lock in **maintenance mode** — concurrent runners are still blocked, but app traffic is **not** gated by the guard wrapper. By this point the table is in a v2-only steady state, so there is no schema mismatch a guarded call could hit. See [Docs → Locks](#1-locks-migration-release-and-maintenance-modes) for the full state machine.
 
 > **Note:**  
 > *Nothing forces you to finalize a migration — you can keep the older data on disk for months. It depends on your use case whether you need to optimize DynamoDB storage cost and performance, and on which behavior you want on rollbacks.*
@@ -292,7 +293,7 @@ It checks:
     - If you deleted older migrations that are no longer needed, you have to specify the starting version in the config per entity, e.g. `User: 5` if your latest migration for User is v5. More on that in the [docs](#docs).
 - Whether two migrations claim the same `from` version of an entity (parallel-branch collision — see [Multi-developer workflow](#3-multi-developer-workflow)).
 - Whether any migration's declared `reads` target has a later-sequenced pending migration (cross-entity ordering — see [Reading from other entities](#5-reading-from-other-entities-during-a-migration)).
-- Whether any entity that previously existed has been removed from `src/entities/`. The framework does not ship destructive migrations in v0.1; if the removal is intentional, see [Retiring entities](#6-retiring-entities).
+- Whether any entity that previously existed has been removed from `src/database/entities/`. The framework does not ship destructive migrations in v0.1; if the removal is intentional, see [Retiring entities](#6-retiring-entities).
 
 ### 2. Performance - running migration on AWS
 Per quickstart the framework runs locally (e.g. CI). But the framework is designed to run migrations on AWS. This is especially useful for large datasets that would take a long time to migrate locally.
@@ -306,12 +307,16 @@ Create a migration handler function using the framework's helper:
 ```ts
 // src/migrationHandler.ts
 import { createLambdaMigrationHandler } from 'electrodb-migrations';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import migrations from './migrations/index.js';
 import { Resource } from 'sst';
+import config from '../electrodb-migrations.config.ts';
 
 export const handler = createLambdaMigrationHandler({
+  config,                                 // migrationStartVersions, lock.*, guard.* defaults — see §5.4
+  client: new DynamoDBClient({}),         // DynamoDB client instance
   apiKey: process.env.MIGRATIONS_API_KEY, // set this env var to protect your migration endpoint
-  table: Resource.AppTable.name,          // resolved in the Lambda environment
+  tableName: Resource.AppTable.name,      // resolved in the Lambda environment
   migrations,                             // statically imported so the bundler picks it up
 });
 ```
@@ -330,7 +335,7 @@ export default defineConfig({
 
 If you now run `npx electrodb-migrations apply --remote`, the framework will send the migration commands to your Lambda function, which will execute them in the cloud.
 
-**How the CLI orchestrates the run.** `apply` / `finalize --all` resolve the pending migration list **locally** (the CLI has the migration files and queries the table for current `_migrations` state), then loop through that list and POST one Lambda invocation per migration. Each invocation runs exactly one migration end-to-end — acquire migration-mode lock → transform → transition to release-mode → return — and the CLI polls its `runId` until terminal before issuing the next one. "Apply all" is never one Lambda call.
+**How the CLI orchestrates the run.** `apply` / `finalize --all` resolve the pending list **locally** (the CLI has the migration files and queries the table for current `_migrations` state), then loop through that list and POST one Lambda invocation per migration. Each invocation runs exactly one migration end-to-end — for `apply`: acquire migration-mode lock → transform → transition to release-mode → return; for `finalize`: acquire maintenance-mode lock → delete v1 records → clear lock → return — and the CLI polls its `runId` until terminal before issuing the next one. "Apply all" / "finalize all" is never one Lambda call.
 
 **Important Notes:**
 
@@ -447,7 +452,7 @@ The framework intentionally does **not** ship "delete this entity's data" migrat
 
 #### 6.1 What happens when you remove an entity
 
-Removing an entity file from `src/entities/` triggers a distinct drift kind: **`entity-removed`**. [`validate`](#1-block-bad-merges-in-ci) reports it explicitly rather than passing silently or scaffolding a destructive migration. CI fails until you decide what to do with the data.
+Removing an entity file from `src/database/entities/` triggers a distinct drift kind: **`entity-removed`**. [`validate`](#1-block-bad-merges-in-ci) reports it explicitly rather than passing silently or scaffolding a destructive migration. CI fails until you decide what to do with the data.
 
 #### 6.2 Acknowledging the removal
 
@@ -472,16 +477,24 @@ A first-class entity-deletion migration with the same lock, audit, and pre-final
 
 Deep dives on the parts of the framework you don't need on day one.
 
-### 1. Locks: migration and release modes
+### 1. Locks: migration, release, and maintenance modes
 
-The framework holds a single global lock on your table while a migration is in progress. The lock has two distinct states.
+The framework holds a single global lock on your table while any migration-system operation is in progress. The lock has three distinct states.
 
 > **Warning — lock scope is table-wide.**  
 > *The lock applies to the entire DynamoDB table, not just the entity being migrated. If your table holds ten entities and you migrate one, the [guard wrapper](#6-wrap-your-dynamodb-client-with-the-migration-guard) rejects traffic for all ten — every entity on that table takes the migration's downtime. This is the simple correct default for v0.1; per-entity lock scoping is on the roadmap.*
 
-**Migration mode.** Held while `apply` is actively scanning, transforming, and writing v2 records. Concurrent migration runners are blocked. If you've wired the [guard wrapper](#6-wrap-your-dynamodb-client-with-the-migration-guard), app traffic is rejected for the duration.
+| State | Blocks other runners? | Gates app traffic via guard? | Used by |
+|---|---|---|---|
+| `migration` | yes | yes | `apply`, `rollback` (active phase) |
+| `release` | yes | yes | post-`apply` / post-`rollback`, until `release` is called |
+| `maintenance` | yes | **no** | `finalize` |
 
-**Release mode.** After `apply` finishes successfully, the lock automatically transitions to release mode. The migration is on disk, but your application code is presumably still on the old shape. The release-mode lock keeps app traffic gated until you confirm the new code is deployed and call `release`.
+**Migration mode.** Held while `apply` (or `rollback`) is actively scanning, transforming, and writing records. Concurrent migration-system runners are blocked. If you've wired the [guard wrapper](#6-wrap-your-dynamodb-client-with-the-migration-guard), app traffic is rejected for the duration.
+
+**Release mode.** After `apply` finishes successfully, the lock automatically transitions to release mode. The migration is on disk, but your application code is presumably still on the old shape. The release-mode lock keeps app traffic gated until you confirm the new code is deployed and call `release`. The migration runner itself is **not** gated by release mode — the next pending migration in an `apply` batch can re-enter migration mode immediately, without an intervening manual `release`.
+
+**Maintenance mode.** Held by `finalize` while v1 records are being deleted. Concurrent runners are still blocked, but app traffic flows — the table is in a v2-only steady state by this point, so there is no schema mismatch a guarded read or write could hit. This avoids gating user traffic for a step that is often deferred for weeks (see [Quick start → Finalize](#9-finalize)).
 
 The typical sequence:
 
@@ -489,10 +502,15 @@ The typical sequence:
 2. `apply` completes. Lock transitions to release mode.
 3. Deploy the version of your app that uses the new entity shape.
 4. Run `release`. Lock cleared. Traffic resumes.
+5. *(later, possibly much later)* Run `finalize`. Lock enters maintenance mode for the duration of the v1 cleanup, then clears.
 
-This two-state design lets you run database migrations and code deploys *in the order that makes sense for each*, without leaving a window where the deployed code expects a shape the data hasn't reached yet.
+This three-state design lets you run database migrations and code deploys *in the order that makes sense for each*, without leaving a window where the deployed code expects a shape the data hasn't reached yet — and without paying for downtime during the v1 cleanup that follows.
 
-**Manual recovery (`unlock`).** If a runner dies mid-migration — process killed, ECS task terminated without graceful shutdown, server crashed — the lock row stays held until the stale-takeover threshold expires (a few hours by default). To skip the wait, the operator can clear the lock manually via the CLI's `unlock` command. Doing so flips any in-progress migration to `failed`, which forces the next `apply` to refuse and demand a `rollback` first — partial writes from the dead runner must not be silently treated as a clean slate.
+**Manual recovery (`unlock`).** If a runner dies mid-operation — process killed, ECS task terminated without graceful shutdown, server crashed — the lock row stays held until the stale-takeover threshold expires (a few hours by default). To skip the wait, the operator can clear the lock manually via the CLI's `unlock` command. The effect depends on which state the lock was in:
+
+- `migration` (apply/rollback) → in-progress migration flipped to `failed`. Next `apply` refuses and demands a `rollback` first — partial writes from the dead runner must not be silently treated as a clean slate.
+- `release` → the run had already completed successfully; `unlock` simply clears the lock (equivalent to running `release`).
+- `maintenance` (finalize) → in-progress finalize flipped to `failed`. The migration stays `applied`; the operator can re-run `finalize` to resume the v1 cleanup.
 
 > **Warning:**  
 > *`unlock` assumes no runner is actually alive. If a runner is still working when you unlock, you will corrupt the migration state. The CLI prompts for confirmation by default and will tell you which runId currently holds the lock.*
@@ -577,7 +595,10 @@ For per-field merge or any logic the named strategies don't cover, ship a resolv
 ```ts
 defineMigration({
   // ...
-  down: async (v2) => v1,
+  down: async (v2) => {
+    const { status: _s, ...v1 } = v2; // derive v1 from v2 — shape depends on the migration
+    return v1;
+  },
   rollbackResolver: async ({
     kind,        // 'A' | 'B' | 'C'
     v1Original,  // undefined for B
@@ -619,15 +640,17 @@ The framework does not ship a server. It gives you a migrations client; you deci
 Inside your handler you import the migrations and build a single migrations client. Reuse it across requests; it caches the lock state and other metadata.
 
 ```ts
-// src/migrationServer.ts
+// src/database/migrationserver.ts
 import { createMigrationsClient } from 'electrodb-migrations';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import migrations from './migrations/index.js';
+import config from '../electrodb-migrations.config.ts';
 
 const client = new DynamoDBClient({});
 const migrate = createMigrationsClient({
+  config,                 // migrationStartVersions, lock.*, guard.* defaults — see §5.4
   client,
-  table: 'app-table',
+  tableName: 'app-table',
   migrations,
 });
 ```
@@ -640,17 +663,34 @@ The client exposes one method per CLI command. Each one acquires the lock, does 
 
 ```ts
 // kick off in the background; resolves once the run is registered, not when it finishes
-const { runId } = await migrate.runInBackground({ command: 'apply' });
+const { runId } = await migrate.runInBackground({ migrationId: '20260501083000-User-add-status', command: 'apply' });
 
 // snapshot the current state of a run (poll this from your `status` endpoint)
 const snapshot = await migrate.getRunStatus(runId);
-// { status: 'running' | 'completed' | 'failed', command, progress?, result?, error? }
+// {
+//   status: 'running' | 'completed' | 'failed',
+//   command: 'apply' | 'rollback' | 'finalize',
+//   migrationId: string,
+//   startedAt: string,         // ISO-8601
+//   elapsedMs: number,         // derived from startedAt at read time
+//   lastHeartbeatAt: string,   // ISO-8601 — load-bearing liveness signal
+//   error?: { code, message, details },  // present only when status === 'failed'
+// }
 ```
+
+> *No per-record `progress` or phase enum — heartbeat freshness is the liveness signal. See [§3.3](#33-http-wire-contract-for---remote) for the rationale.*
 
 `release` is fast (a single conditional update) and stays blocking:
 
 ```ts
 await migrate.release();                                           // returns { released: true }
+```
+
+`history` is a read-only query against the migration state log — also fast and synchronous. It never acquires the lock.
+
+```ts
+const { migrations } = await migrate.history();                       // full log
+const { migrations } = await migrate.history({ entityName: 'User' }); // filter to one entity
 ```
 
 Blocking variants (`migrate.apply()`, `migrate.rollback(id)`, `migrate.finalize(id)`) are still available — the local CLI uses them directly. Use them when you control the caller and don't need a status channel.
@@ -659,7 +699,7 @@ Errors thrown by these methods are instances of `EDBMigrationError`. The most co
 
 - `EDBMigrationLockHeldError` — another runner holds the lock.
 - `EDBRequiresRollbackError` — a previous `apply` failed mid-run; the head migration must be rolled back before any new `apply`.
-- `EDBRollbackNotPossibleError` — `down` is missing in a case that requires it (see [Detailed docs → Rollback](#2-rollback)).
+- `EDBRollbackNotPossibleError` — `down` is missing in a case that requires it (see [Docs → Rollback](#2-rollback)).
 - `EDBRollbackOutOfOrderError` — the requested migration is not the head.
 
 Errors are split into two categories: **start errors** (validation, lock held, no migrations to run) are thrown synchronously by `runInBackground` before a `runId` is issued. **Run errors** (failures during execution) surface on the snapshot returned by `getRunStatus` as `{ status: 'failed', error: { code, message, details } }`.
@@ -673,7 +713,7 @@ POST <remote.url>
 X-Api-Key: <remote.apiKey>
 Content-Type: application/json
 
-{ "command": "<apply|rollback|finalize|release|status|unlock>", "args": { ... } }
+{ "command": "<apply|rollback|finalize|release|status|history|unlock>", "args": { ... } }
 ```
 
 The contract is **async**: `apply`, `rollback`, and `finalize` start the work in the background and return a `runId` immediately. The CLI then polls `status` until the run reaches a terminal state. `release` and `status` are synchronous.
@@ -687,6 +727,7 @@ Per-command body and success response:
 | `finalize` | async      | `{ migrationId: string }`                           | `{ runId: string, status: 'started' }`                       |
 | `release`  | sync       | `{}`                                                | `{ released: true }`                                         |
 | `status`   | sync       | `{ runId: string }`                                 | see *status response* below                                  |
+| `history`  | sync       | `{ entityName?: string }`                           | `{ migrations: MigrationRecord[] }`                          |
 | `unlock`   | sync       | `{ runId?: string }`                                | `{ unlocked: true, markedFailed: string[] }`                 |
 
 Each async command targets exactly one migration. The CLI's `apply` / `finalize --all` commands are CLI-tier loops that resolve the pending list locally and POST one request per migration in sequence — "apply all" or "finalize all" never crosses the wire as a single call. This is what gives every migration its own 15-minute Lambda budget instead of forcing the whole batch through one invocation.
@@ -720,41 +761,227 @@ Your handler validates the api key, switches on `command`, and routes to `migrat
 
 #### 3.4 Operational notes
 
-The process must stay up for the duration of an `apply` or `rollback`. The framework holds the lock with periodic heartbeats; if the process dies mid-run, the lock falls back to its stale-takeover threshold (a few hours by default) before another runner can take over. Configure the heartbeat interval and stale threshold in `electrodb-migrations.config.ts`.
+The process must stay up for the duration of an `apply` or `rollback`. The framework holds the lock with periodic heartbeats; if the process dies mid-run, the lock falls back to its stale-takeover threshold (a few hours by default) before another runner can take over. Both intervals are configurable — see [§5.1.3 `lock`](#513-lock) for the options and [§5.4](#54-how-settings-reach-the-runtime) for how they reach this server.
 
 If a task dies mid-migration and you don't want to wait out the stale-takeover threshold, the CLI's `unlock` command clears the lock and marks any in-progress migration as `failed`. Read its full docs before reaching for it — used incorrectly, it will corrupt migration state.
 
 ### 4. CLI
 
+The CLI is the primary entry point for day-to-day use. Every command inherits the [global options](#41-global-options); command-specific flags are listed below each subsection.
+
 #### 4.1 Global options
+
+| Flag | Purpose |
+|---|---|
+| `--config <path>` | Path to the config file. Default: auto-resolved from project root. Ignored by `init` (no config exists yet). |
+| `--remote` | Send the command to the configured `remote` endpoint instead of executing locally. Requires `remote.url` and `remote.apiKey` in the config. Only meaningful for database-touching commands (`apply`, `rollback`, `finalize`, `release`, `status`, `unlock`); ignored by file-only commands (`init`, `baseline`, `create`, `validate`, `acknowledge-removal`). |
+| `--region <region>` | Override `config.region`. Used by database-touching commands only. |
+| `--table <name>` | Override `config.tableName`. Used by database-touching commands only. |
 
 #### 4.2 init
 
+Bootstraps the project — creates `.electrodb-migrations/`, the migrations directory, and the config file with sensible defaults pre-populated. Config-override globals do not apply (the file does not exist yet).
+
+| Flag | Purpose |
+|---|---|
+| `--force` | Re-initialize even when `electrodb-migrations.config.ts` already exists. Overwrites. |
+
 #### 4.3 baseline
+
+Snapshot the current shape of every entity into the framework's internal state without scaffolding any migration. Use once on adoption; greenfield projects skip it. No command-specific flags.
 
 #### 4.4 create
 
+Scaffold a migration after editing an entity, or re-frame an existing one after a rebase.
+
+> **Side effect — edits your entity source file.**  
+> *`create` bumps `model.version` in the entity file (e.g. `'1' → '2'`). This is the only edit the framework ever makes to your source code. `--regenerate` does the same when the new baseline has advanced past the migration's current `to` version.*
+
+| Flag | Purpose |
+|---|---|
+| `--entity <name>` | Required (unless using `--regenerate`). The entity to scaffold a migration for. |
+| `--name <slug>` | Required (unless using `--regenerate`). Human-readable slug appended to the migration id. |
+| `--force` | Scaffold even when no shape drift is detected. Use for behavior-only changes that still need data work. |
+| `--regenerate <id>` | Re-frame an existing migration onto the new baseline after a rebase. Preserves your `up()`/`down()`; rewrites `v1.ts`/`v2.ts`. |
+
 #### 4.5 apply
+
+Apply every pending migration in sequence. Each acquires the lock, transforms records, and transitions to release-mode on success.
+
+| Flag | Purpose |
+|---|---|
+| `--migration <id>` | Apply only this migration. Refuses if it is not the next pending migration in the sequence — order is enforced. |
 
 #### 4.6 release
 
+Clear the release-mode lock after deploying app code that uses the new entity shape. No command-specific flags.
+
 #### 4.7 finalize
+
+Permanently delete the v1 records for an applied migration. Takes the migration id as a positional argument, or `--all`. Acquires the lock in **maintenance mode** — blocks other runners but lets app traffic continue (see [Docs → Locks](#1-locks-migration-release-and-maintenance-modes)).
+
+| Flag | Purpose |
+|---|---|
+| `--all` | Finalize every applied migration whose post-apply bake window has elapsed. |
 
 #### 4.8 rollback
 
+Roll back the head migration of an entity. Takes the migration id as a required positional argument.
+
+| Flag | Purpose |
+|---|---|
+| `--strategy <name>` | One of `projected` (default; requires `down`), `snapshot`, `fill-only` (requires `down`), `custom` (requires `rollbackResolver`). See [§2 Rollback](#2-rollback). |
+
 #### 4.9 status
 
-#### 4.10 unlock
+Inspect lock state and migration progress. Takes an optional migration id as a positional argument; without one, reports on all in-flight runs and the global lock state. No command-specific flags.
 
-#### 4.11 validate
+#### 4.10 history
 
-#### 4.12 acknowledge-removal
+Print the complete migration log — every applied, finalized, reverted, or failed migration with their timestamps and status transitions. Read-only; never acquires the lock.
+
+| Flag | Purpose |
+|---|---|
+| `--entity <name>` | Filter to migrations on a single entity. |
+| `--json` | Emit machine-readable JSON instead of the human-readable table. |
+
+#### 4.11 unlock
+
+Manual lock recovery — clears the lock and marks any in-progress migration as `failed`. Read [Docs → Locks](#1-locks-migration-release-and-maintenance-modes) before using.
+
+| Flag | Purpose |
+|---|---|
+| `--yes` | Skip the interactive confirmation prompt. Required for non-interactive use (CI). |
+
+#### 4.12 validate
+
+CI pre-merge gate. Exits non-zero on drift without scaffolded migration, version skew, parallel-branch collisions, cross-entity ordering violations, or removed entities. No command-specific flags.
+
+#### 4.13 acknowledge-removal
+
+Advance the framework's snapshot to record an entity as intentionally removed. Takes the entity name as a required positional argument. Does not touch records on disk. No command-specific flags.
 
 ### 5. Configuration reference
 
 #### 5.1 The config file
 
+`defineConfig` is the single source of truth for the framework. The CLI reads the file directly; runtime APIs (`createMigrationsClient`, `wrapClientWithMigrationGuard`, `createLambdaMigrationHandler`) accept its return value as a `config` argument so every process — CLI, app, migration runner — sees the same values. See [§5.4](#54-how-settings-reach-the-runtime) for the wiring patterns.
+
+The config file lives at the project root (same convention as `vitest.config.ts`, `tsup.config.ts`, etc.). Supported extensions: `.ts`, `.js`, `.mjs`, `.cjs`, `.json`. **Every option is optional** — `init` pre-populates `entities`, `migrations`, and the `keyNames` defaults so a fresh project works out-of-the-box.
+
+##### 5.1.1 Top-level options
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `entities` | `string \| string[]` | `'src/database/entities'` | Directory (recursive) or explicit file list of ElectroDB entities. Pre-populated by `init`. |
+| `migrations` | `string` | `'src/database/migrations'` | Directory the CLI writes migration folders into. Pre-populated by `init`. |
+| `region` | `string` | auto-detect → `'us-east-1'` | AWS region for the DynamoDB client. If omitted, uses the region the runner is in (env vars like `AWS_REGION`, EC2/Lambda metadata, SDK default chain). When no region can be detected, falls back to `us-east-1`. |
+| `tableName` | `string` | — | DynamoDB table name. Override at the CLI (`--table`) or by passing `tableName` to a runtime API. |
+
+##### 5.1.2 `keyNames`
+
+Override the default attribute names if your table uses different ones (e.g. `PK` / `SK`, or renamed ElectroDB marker fields).
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `keyNames.partitionKey` | `string` | `'pk'` | Partition-key attribute name on your table. |
+| `keyNames.sortKey` | `string` | `'sk'` | Sort-key attribute name on your table. |
+| `keyNames.electroEntity` | `string` | `'__edb_e__'` | ElectroDB entity-name marker field. Override if your table renames it. |
+| `keyNames.electroVersion` | `string` | `'__edb_v__'` | ElectroDB entity-version marker field. Override if your table renames it. |
+
+##### 5.1.3 `lock`
+
+Lock-row tuning, used by the migration runner.
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `lock.heartbeatMs` | `number` | `30_000` | How often the active runner refreshes its lock heartbeat. |
+| `lock.staleThresholdMs` | `number` | `4 * 60 * 60_000` (4h) | Wall time after `lastHeartbeatAt` before another runner may take over a dead lock. |
+| `lock.acquireWaitMs` | `number` | `15_000` | Pause between lock acquisition and starting transform work. **Sized so guard caches expire — see [§5.3](#53-lock-and-guard-timing-safety-invariant).** |
+
+##### 5.1.4 `guard`
+
+Guard wrapper tuning, used by every guarded app process.
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `guard.cacheTtlMs` | `number` | `5_000` | Per-process TTL for the cached lock-row `GetItem`. **Must be `< lock.acquireWaitMs` — see [§5.3](#53-lock-and-guard-timing-safety-invariant).** |
+| `guard.blockMode` | `'all' \| 'writes-only'` | `'all'` | Which guarded calls reject with `EDBMigrationInProgressError`. `'all'` (default) gates reads and writes — the recommended posture, since reading mid-migration data through a stale schema can silently mis-deserialize. `'writes-only'` keeps reads flowing for read-heavy apps that tolerate stale-shape reads but still need writes blocked. |
+
+> **⚠ Load-bearing inequality.**  
+> *`guard.cacheTtlMs` must be strictly less than `lock.acquireWaitMs`. The framework refuses to start otherwise. See [§5.3](#53-lock-and-guard-timing-safety-invariant) for why and how to tune both safely together.*
+
+##### 5.1.5 `remote`
+
+Remote-runner endpoint used by every CLI command's `--remote` flag.
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `remote.url` | `string` | — | Endpoint receiving `--remote` POSTs (Lambda URL, ALB, etc.). |
+| `remote.apiKey` | `string` | — | Sent as `X-Api-Key` to gate the remote handler. |
+
+##### 5.1.6 `migrationStartVersions`
+
+Per-entity starting version for the migration sequence. Set when older migrations have been deleted and the entity's history no longer starts at v1. (Distinct from the `baseline` CLI command, which snapshots current entity shapes during adoption.)
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `migrationStartVersions` | `Record<string, { version: number }>` | `{}` | `{ User: { version: 5 } }` declares the next User migration begins at v5→v6. Read by both `validate` (CI gate, see [Recommended → Block bad merges in CI](#1-block-bad-merges-in-ci)) and the migration runner — single source so they cannot disagree. |
+
 #### 5.2 Config file resolution and lookup order
+
+#### 5.3 Lock and guard timing safety invariant
+
+The migration runner acquires the lock, waits `lock.acquireWaitMs`, then mutates data. The guard wrapper — running inside every app process — caches the lock-row read for `guard.cacheTtlMs`. Both numbers are configurable; their relationship is not.
+
+> **⚠ `guard.cacheTtlMs < lock.acquireWaitMs`.**  
+> *This is the only configuration constraint the framework validates at startup. The runner refuses to acquire the lock if its config violates it.*
+
+**What goes wrong if violated.** A guarded app process reads the lock row at T=0 and caches "unlocked". The migration runner acquires the lock at T+0.5s. If `cacheTtlMs >= acquireWaitMs`, the guarded process's cache is still valid when the runner finishes its wait window and begins writing v2 records. Every guarded call in that overlap goes to the wire and lands on a half-migrated table — exactly the corruption the guard exists to prevent.
+
+**Recommended defaults.**
+
+| Setting | Default | Rationale |
+|---|---|---|
+| `guard.cacheTtlMs` | `5_000` | One `GetItem` per process per 5s — negligible at any scale. |
+| `lock.acquireWaitMs` | `15_000` | 3× the cache TTL — every cached entry has expired with margin before any write. |
+| `lock.heartbeatMs` | `30_000` | Frequent enough to detect a dead runner within minutes; rare enough not to hot-spot the lock row. |
+| `lock.staleThresholdMs` | `14_400_000` (4h) | Multi-hour Lambda/ECS scenarios; operators using `unlock` are the fast path. |
+
+**Tuning.** Keep the 3× ratio between `cacheTtlMs` and `acquireWaitMs`. A fleet sensitive to per-process `GetItem` cost can shrink to `1_000` / `3_000`. Wide clock skew across regions can push both up proportionally. Never tune one without the other.
+
+See also: [Docs → Locks](#1-locks-migration-release-and-maintenance-modes), [Quick start → Wrap your DynamoDB client with the migration guard](#6-wrap-your-dynamodb-client-with-the-migration-guard).
+
+#### 5.4 How settings reach the runtime
+
+The CLI reads `electrodb-migrations.config.ts` directly — `validate`, `create`, local `apply`, etc. all auto-resolve the file. Runtime APIs do **not** auto-resolve it from disk; that wouldn't survive bundling into Lambda or shipping to ECS. Instead, the user imports the config file in their runtime code and passes it as the `config` argument to whichever client they construct. Every option declared in the config — `migrationStartVersions`, `keyNames`, `lock.*`, `guard.*`, `region`, default `tableName` — flows through that single argument.
+
+```ts
+// src/migrationHandler.ts
+import { createLambdaMigrationHandler } from 'electrodb-migrations';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { Resource } from 'sst';
+import migrations from './migrations/index.js';
+import config from '../electrodb-migrations.config.ts';
+
+export const handler = createLambdaMigrationHandler({
+  config,                                 // migrationStartVersions, lock.*, guard.* defaults all live here
+  migrations,                             // runtime-only — the imported migration list
+  client: new DynamoDBClient({}),         // runtime-only — DDB client instance
+  tableName: Resource.AppTable.name,      // optional override of config.tableName
+  apiKey: process.env.MIGRATIONS_API_KEY, // runtime-only — env-sourced
+});
+```
+
+**What's split between the two arg surfaces.**
+
+| Comes from `config` | Comes from runtime args |
+|---|---|
+| `migrationStartVersions`, `keyNames`, `lock.*`, `guard.*`, `region` | DynamoDB `client` instance, `migrations` array, `apiKey`, env-sourced or SST-resolved overrides of `tableName` |
+
+**Override precedence.** Explicit runtime arg > CLI flag (CLI only) > `config.<field>` > built-in default. Runtime APIs only let you override values that vary per process — `tableName`, `apiKey`. The lock/guard knobs are read from `config` exclusively so they cannot drift between the runner and the guard.
+
+**Project layout.** The config file lives at project root by convention. In monorepos where the migration server is a separate package, a shared `packages/migration-config` exporting the `defineConfig` result keeps everything in one place. Either way, the *only* source of truth is the file imported into every runtime entry point.
 
 ### 6. Migration definition reference
 
