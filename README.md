@@ -34,7 +34,7 @@ You keep a single source-of-truth entity file (e.g. `src/entities/user.ts`). Whe
 ## Quick start
 
 > **Heads up:**  
-> *Before going to production, it is **highly** recommended to read the [Recommended](#recommended) section.*
+> *Quick start covers the production-safe baseline. For best practices around CI gating, multi-developer teams, large datasets, and testing, read the [Recommended](#recommended) section before going to production.*
 
 ### 1. Initialize
 
@@ -51,7 +51,7 @@ electrodb-migrations.config.ts        # framework configuration
 ```
 
 > **Commit `.electrodb-migrations/`** along with your code.  
-> *Despite being framework-managed, this directory holds the drift snapshots that CI's `validate` gate compares against. See [Recommended → Multi-developer workflow](#4-multi-developer-workflow) for resolving merge conflicts when two branches scaffold a migration in parallel.*
+> *Despite being framework-managed, this directory holds the drift snapshots that CI's `validate` gate compares against. See [Recommended → Multi-developer workflow](#3-multi-developer-workflow) for resolving merge conflicts when two branches scaffold a migration in parallel.*
 
 The config is a `.ts` file so you can dynamically set the table name from env vars, SST `Resource` references, etc.
 
@@ -154,7 +154,7 @@ export default defineMigration({
 
 `up` is required, `down` is optional but required for post-finalize rollback.
 
-**Reading related records during the transform.** Both `up` and `down` receive a second arg `ctx`. Use `ctx.entity(SomeEntity)` to read related records — never your app's regular entity imports, which route through the [guard wrapper](#1-wrap-your-dynamodb-client-with-the-migration-guard) and will throw during a migration.
+**Reading related records during the transform.** Both `up` and `down` receive a second arg `ctx`. Use `ctx.entity(SomeEntity)` to read related records — never your app's regular entity imports, which route through the [guard wrapper](#6-wrap-your-dynamodb-client-with-the-migration-guard) and will throw during a migration.
 
 ```ts
 import { Team } from '../../entities/team.js';
@@ -169,59 +169,9 @@ up: async (user, ctx) => {
 Reads only — writes through `ctx` throw. Reading the entity currently being migrated (`ctx.entity(User)` from inside a User migration) also throws: the on-disk state is mid-flight and reads would be order-dependent.
 
 > **⚠ Highly discouraged unless you actually need it.**  
-> *Every read fires once per record, serially. A migration over a million rows that does one extra read per row issues a million extra `GetItem` calls — dramatically slowing the run and extending the lock window. Prefer denormalizing the value differently, or pre-loading the lookup data into memory in your runner before calling `apply`. See [Recommended → Reading from other entities](#6-reading-from-other-entities-during-a-migration) for the ordering rule that keeps these reads safe.*
+> *Every read fires once per record, serially. A migration over a million rows that does one extra read per row issues a million extra `GetItem` calls — dramatically slowing the run and extending the lock window. Prefer denormalizing the value differently, or pre-loading the lookup data into memory in your runner before calling `apply`. See [Recommended → Reading from other entities](#5-reading-from-other-entities-during-a-migration) for the ordering rule that keeps these reads safe.*
 
-### 6. Apply
-
-```sh
-npx electrodb-migrations apply
-```
-
-What happens:
-
-- Acquires the **migration lock** on the table — blocks concurrent migration runners and, if you've wired the guard wrapper, app traffic too.
-- Scans v1 records, runs your `up()` against each, writes v2 records alongside.
-- Both versions coexist on disk. ElectroDB's identity stamps mean v1 reads see only v1, v2 reads see only v2.
-- On success, marks the migration `applied` and transitions the lock to **release mode** — still gates traffic, until you call `release` after deploying your new code.
-
-> **Note:**  
-> *Multiple migrations will be applied in sequence, each acquiring and releasing the lock as needed.*
-
-> **Want details on the lock?**  
-> *See [Detailed docs → Locks](#1-locks-migration-and-release-modes) for the full state machine and why the release-mode handoff exists.*
-
-
-### 7. Deploy your code, then release
-
-Deploy the version of your app that uses the new entity shape. Once it's live and healthy:
-
-```sh
-npx electrodb-migrations release
-```
-
-The release lock is cleared. Traffic flows.
-
-### 8. Finalize
-
-After a bake window where you're satisfied nothing is broken, finalize the migration:
-
-```sh
-npx electrodb-migrations finalize 20260501083000-User-add-status
-# OR
-npx electrodb-migrations finalize --all
-```
-
-Deletes the v1 records. Marks the migration `finalized`. Permanent.
-
-> **Note:**  
-> *Nothing forces you to finalize a migration — you can keep the older data on disk for months. It depends on your use case whether you need to optimize DynamoDB storage cost and performance, and on which behavior you want on rollbacks.*
----
-
-## Recommended
-
-The quick start gets you running. But it is highly recommended to apply the following practices in production to avoid silent corruption and bad merges and improve performance during the migration process.
-
-### 1. Wrap your DynamoDB client with the migration guard
+### 6. Wrap your DynamoDB client with the migration guard
 
 While a migration is running, has failed, or is in release mode, you do **not** want app traffic hitting the database. Data consistency is not guaranteed during these states — there is no live caching of database writes in the current version, meaning the migration **has** downtime.
 
@@ -273,7 +223,57 @@ app.use((err, req, res, next) => {
 
 The framework deliberately does **not** prescribe a `Retry-After` value — your migration's expected runtime is your call.
 
-### 2. Block bad merges in CI
+### 7. Apply
+
+```sh
+npx electrodb-migrations apply
+```
+
+What happens:
+
+- Acquires the **migration lock** on the table — blocks concurrent migration runners and, if you've wired the guard wrapper, app traffic too.
+- Scans v1 records, runs your `up()` against each, writes v2 records alongside.
+- Both versions coexist on disk. ElectroDB's identity stamps mean v1 reads see only v1, v2 reads see only v2.
+- On success, marks the migration `applied` and transitions the lock to **release mode** — still gates traffic, until you call `release` after deploying your new code.
+
+> **Note:**  
+> *Multiple migrations will be applied in sequence, each acquiring and releasing the lock as needed.*
+
+> **Want details on the lock?**  
+> *See [Detailed docs → Locks](#1-locks-migration-and-release-modes) for the full state machine and why the release-mode handoff exists.*
+
+
+### 8. Deploy your code, then release
+
+Deploy the version of your app that uses the new entity shape. Once it's live and healthy:
+
+```sh
+npx electrodb-migrations release
+```
+
+The release lock is cleared. Traffic flows.
+
+### 9. Finalize
+
+After a bake window where you're satisfied nothing is broken, finalize the migration:
+
+```sh
+npx electrodb-migrations finalize 20260501083000-User-add-status
+# OR
+npx electrodb-migrations finalize --all
+```
+
+Deletes the v1 records. Marks the migration `finalized`. Permanent.
+
+> **Note:**  
+> *Nothing forces you to finalize a migration — you can keep the older data on disk for months. It depends on your use case whether you need to optimize DynamoDB storage cost and performance, and on which behavior you want on rollbacks.*
+---
+
+## Recommended
+
+Quick start covers the production-safe baseline. The practices in this section harden it further: gating bad merges in CI, scaling for large datasets, working in a multi-developer team, testing migrations before they touch production data, and handling the rarer cases of cross-entity reads and entity removal.
+
+### 1. Block bad merges in CI
 
 Run this in your CI pipeline as a pre-merge or pre-deploy gate:
 
@@ -289,16 +289,16 @@ It checks:
 - Whether the entity version is in sync with the migrations version.
 - Whether the migrations start at version 1 and increment by 1 for each migration (no resets or skips).
     - If you deleted older migrations that are no longer needed, you have to specify the starting version in the config per entity, e.g. `User: 5` if your latest migration for User is v5. More on that in the [docs](#docs).
-- Whether two migrations claim the same `from` version of an entity (parallel-branch collision — see [Multi-developer workflow](#4-multi-developer-workflow)).
-- Whether any migration's declared `reads` target has a later-sequenced pending migration (cross-entity ordering — see [Reading from other entities](#6-reading-from-other-entities-during-a-migration)).
-- Whether any entity that previously existed has been removed from `src/entities/`. The framework does not ship destructive migrations in v0.1; if the removal is intentional, see [Retiring entities](#7-retiring-entities).
+- Whether two migrations claim the same `from` version of an entity (parallel-branch collision — see [Multi-developer workflow](#3-multi-developer-workflow)).
+- Whether any migration's declared `reads` target has a later-sequenced pending migration (cross-entity ordering — see [Reading from other entities](#5-reading-from-other-entities-during-a-migration)).
+- Whether any entity that previously existed has been removed from `src/entities/`. The framework does not ship destructive migrations in v0.1; if the removal is intentional, see [Retiring entities](#6-retiring-entities).
 
-### 3. Performance - running migration on AWS
+### 2. Performance - running migration on AWS
 Per quickstart the framework runs locally (e.g. CI). But the framework is designed to run migrations on AWS. This is especially useful for large datasets that would take a long time to migrate locally.
 
 The easiest way to run migrations is via AWS Lambda, but it has its limitations (max 15 minutes execution time, cold starts, etc.). For long-running migrations, it is recommended to run them on an EC2 instance or a container service like ECS or EKS.
 
-#### 3.1 AWS Lambda approach
+#### 2.1 AWS Lambda approach
 
 Create a migration handler function using the framework's helper:
 
@@ -335,10 +335,10 @@ If you now run `npx electrodb-migrations apply --remote`, the framework will sen
 - Make sure you table has sufficient read/write capacity to handle the migration workload, especially if you have a large dataset. Consider using on-demand capacity or temporarily increasing provisioned capacity during the migration.
 - All CLI commands that interact with the database (apply, release, finalize, rollback) can be run with the `--remote` flag to execute them on AWS instead of locally. This way your CLI does not need direct access to the database and can leverage the cloud for execution.
 
-#### 3.2 Long-running server approach
+#### 2.2 Long-running server approach
 For long-running migrations that exceed Lambda's limits, you can run the framework inside a long-running Node process on an EC2 instance or a container in ECS/EKS. The framework does not provide a server implementation, but you can easily build one using the migrations client. See [detailed docs](#3-running-on-a-long-running-migration-server) for more information.
 
-### 4. Multi-developer workflow
+### 3. Multi-developer workflow
 
 `.electrodb-migrations/` is committed (per [step 1](#1-initialize)). That gives CI the history it needs to detect drift, but it also means parallel branches that both scaffold a migration on the same entity will collide.
 
@@ -353,7 +353,7 @@ Each migration folder ships a frozen `v1.ts` (the pre-migration shape) and `v2.t
 - B's `v1.ts` no longer matches the new "previous" shape (which is A's v2).
 - B's `up()` was written assuming the v1 input shape.
 
-CI's [`validate` gate](#2-block-bad-merges-in-ci) catches this before merge — but you still have to fix B before it can land.
+CI's [`validate` gate](#1-block-bad-merges-in-ci) catches this before merge — but you still have to fix B before it can land.
 
 **The fix.**
 
@@ -369,7 +369,7 @@ CI's [`validate` gate](#2-block-bad-merges-in-ci) catches this before merge — 
 > **Note:**  
 > *The same workflow applies to slow-merging PRs and long-lived branches: any time main moves on after you've scaffolded, run `--regenerate` before requesting another review.*
 
-### 5. Test your migrations
+### 4. Test your migrations
 
 A migration's `up()` is the only chance you get to transform every existing record correctly. Validate it before you ever run `apply` against production.
 
@@ -389,18 +389,18 @@ Output of `up()` is validated against v2's ElectroDB schema automatically, so a 
 
 See [Docs → Testing migrations](#8-testing-migrations) for the full case-shape catalog and the rollback-resolver harness.
 
-### 6. Reading from other entities during a migration
+### 5. Reading from other entities during a migration
 
 `up()` and `down()` receive a `ctx` argument (see [step 5](#5-fill-in-the-transform)). Through it you can read related records via `ctx.entity(Other)` — bound to the migration runner's unguarded client so it works while the lock is held. **Don't reach for this lightly.**
 
 > **⚠ Discouraged by default — every read multiplies your migration runtime.**  
 > *Reads inside `up()`/`down()` fire once per record, serially against your migration's throughput budget. Over a million-row table, one extra read per row is a million extra `GetItem` calls before the migration can finish — and the lock stays held the whole time. Almost always faster: denormalize differently, or pre-load the lookup table into memory in your runner before invoking `apply`.*
 
-#### 6.1 Cross-entity ordering rule
+#### 5.1 Cross-entity ordering rule
 
 When migration `M` reads entity `Y` via `ctx.entity(Y)`, the on-disk shape of `Y` must match the source `Y` you imported. That holds iff every pending migration on `Y` is sequenced *before* `M`. If `Y` has any migration sequenced after `M`, on-disk `Y` is still at an older shape and the read would silently mis-deserialize.
 
-#### 6.2 Declare what you read
+#### 5.2 Declare what you read
 
 Add a `reads` field to `defineMigration` listing every entity the transform touches via `ctx.entity()`:
 
@@ -421,16 +421,16 @@ defineMigration({
 
 The framework uses `reads` for two things:
 
-- **CI gate.** [`validate`](#2-block-bad-merges-in-ci) refuses any branch where a declared `reads` target has a later-sequenced pending migration. The error names both migrations and points at the fix.
+- **CI gate.** [`validate`](#1-block-bad-merges-in-ci) refuses any branch where a declared `reads` target has a later-sequenced pending migration. The error names both migrations and points at the fix.
 - **Rollback ordering.** Rolling back `M` is refused if any migration on a `reads` target has been applied since `M`; those must be rolled back first. The head rule already enforces this within a single entity; `reads` extends it across entities.
 
-#### 6.3 Runtime guard (the safety net)
+#### 5.3 Runtime guard (the safety net)
 
 Even without `reads` declared, `ctx.entity(Y)` checks at call time that on-disk `Y` matches the imported source. On mismatch it throws `EDBStaleEntityReadError` *before* hitting DynamoDB, naming the conflicting migration. The same call also throws `EDBSelfReadInMigrationError` if you try to read the entity currently being migrated.
 
 The runtime guard catches forgotten declarations; the `reads` declaration catches the same problem at PR review time, before a production apply. Use both.
 
-#### 6.4 Resolving a conflict
+#### 5.4 Resolving a conflict
 
 When `validate` flags a cross-entity ordering conflict, you have three options:
 
@@ -438,15 +438,15 @@ When `validate` flags a cross-entity ordering conflict, you have three options:
 2. **Combine** both changes into a single migration if they're tightly coupled.
 3. **Stop denormalizing** across that boundary — compute the value a different way that doesn't require the cross-entity read.
 
-### 7. Retiring entities
+### 6. Retiring entities
 
 The framework intentionally does **not** ship "delete this entity's data" migrations in v0.1. Every other migration kind preserves a recovery path — `down()` reconstructs v1, or pre-finalize rollback restores from v1 records still on disk. A destructive migration cannot offer that: once finalized, the data is gone and only an out-of-band DynamoDB backup can bring it back. Until v0.2 designs that flow with explicit guards, data deletion is treated as the operator's responsibility.
 
-#### 7.1 What happens when you remove an entity
+#### 6.1 What happens when you remove an entity
 
-Removing an entity file from `src/entities/` triggers a distinct drift kind: **`entity-removed`**. [`validate`](#2-block-bad-merges-in-ci) reports it explicitly rather than passing silently or scaffolding a destructive migration. CI fails until you decide what to do with the data.
+Removing an entity file from `src/entities/` triggers a distinct drift kind: **`entity-removed`**. [`validate`](#1-block-bad-merges-in-ci) reports it explicitly rather than passing silently or scaffolding a destructive migration. CI fails until you decide what to do with the data.
 
-#### 7.2 Acknowledging the removal
+#### 6.2 Acknowledging the removal
 
 If the entity is being retired and you've handled the data separately (one-off cleanup script, TTL-based expiry, or you're keeping the records in place for now), tell the framework to advance the snapshot:
 
@@ -459,7 +459,7 @@ This updates the framework's internal snapshot to record that User is intentiona
 > **What this command will not do for you.**  
 > *It will not delete records, will not check whether records still exist, and will not coordinate the removal with the migration lock. If you want existing rows gone, write and run that cleanup yourself before or after acknowledging.*
 
-#### 7.3 What v0.2 will offer
+#### 6.3 What v0.2 will offer
 
 A first-class entity-deletion migration with the same lock, audit, and pre-finalize rollback guarantees as transform migrations — plus an optional archive hook for the common "copy to a separate entity before deleting" pattern. See [Future plans → Entity deletion migrations](#144-entity-deletion-migrations).
 
@@ -474,9 +474,9 @@ Deep dives on the parts of the framework you don't need on day one.
 The framework holds a single global lock on your table while a migration is in progress. The lock has two distinct states.
 
 > **Warning — lock scope is table-wide.**  
-> *The lock applies to the entire DynamoDB table, not just the entity being migrated. If your table holds ten entities and you migrate one, the [guard wrapper](#1-wrap-your-dynamodb-client-with-the-migration-guard) rejects traffic for all ten — every entity on that table takes the migration's downtime. This is the simple correct default for v0.1; per-entity lock scoping is on the roadmap.*
+> *The lock applies to the entire DynamoDB table, not just the entity being migrated. If your table holds ten entities and you migrate one, the [guard wrapper](#6-wrap-your-dynamodb-client-with-the-migration-guard) rejects traffic for all ten — every entity on that table takes the migration's downtime. This is the simple correct default for v0.1; per-entity lock scoping is on the roadmap.*
 
-**Migration mode.** Held while `apply` is actively scanning, transforming, and writing v2 records. Concurrent migration runners are blocked. If you've wired the [guard wrapper](#1-wrap-your-dynamodb-client-with-the-migration-guard), app traffic is rejected for the duration.
+**Migration mode.** Held while `apply` is actively scanning, transforming, and writing v2 records. Concurrent migration runners are blocked. If you've wired the [guard wrapper](#6-wrap-your-dynamodb-client-with-the-migration-guard), app traffic is rejected for the duration.
 
 **Release mode.** After `apply` finishes successfully, the lock automatically transitions to release mode. The migration is on disk, but your application code is presumably still on the old shape. The release-mode lock keeps app traffic gated until you confirm the new code is deployed and call `release`.
 
@@ -607,7 +607,7 @@ The v1 records are already gone, so every v2 record is effectively Type B. Only 
 
 ### 3. Running on a long-running migration server
 
-The Lambda approach in [Recommended → Performance](#3-performance---running-migration-on-aws) is the simplest path, but it's bounded by Lambda's 15-minute execution limit. For large tables run the framework inside a long-running Node process — typically an ECS task, an EC2 instance, or any container.
+The Lambda approach in [Recommended → Performance](#2-performance---running-migration-on-aws) is the simplest path, but it's bounded by Lambda's 15-minute execution limit. For large tables run the framework inside a long-running Node process — typically an ECS task, an EC2 instance, or any container.
 
 The framework does not ship a server. It gives you a migrations client; you decide how to receive commands and route them to it.
 
@@ -863,7 +863,7 @@ describe('add-status migration', () => {
 
 #### 9.3 EDBMigrationInProgressError
 
-Thrown by the [migration guard](#1-wrap-your-dynamodb-client-with-the-migration-guard) when the app tries to read or write while the lock is held. See the linked section for the recommended 503 + `Retry-After` handling pattern and the `isMigrationInProgress(err)` helper.
+Thrown by the [migration guard](#6-wrap-your-dynamodb-client-with-the-migration-guard) when the app tries to read or write while the lock is held. See the linked section for the recommended 503 + `Retry-After` handling pattern and the `isMigrationInProgress(err)` helper.
 
 #### 9.4 EDBRequiresRollbackError
 
