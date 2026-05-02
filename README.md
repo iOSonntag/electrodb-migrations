@@ -21,7 +21,6 @@ Peer dependencies: `electrodb >= 3.0.0`, `@aws-sdk/client-dynamodb >= 3.0.0`. No
 - [What it does](#what-it-does)
 - [Quick start](#quick-start)
 - [Recommended](#recommended)
-- [Concepts](#concepts)
 - [Detailed docs](#detailed-docs)
 
 ---
@@ -169,7 +168,7 @@ What happens:
 > *Multiple migrations will be applied in sequence, each acquiring and releasing the lock as needed.*
 
 > **Want details on the lock?**  
-> *See [Concepts → Locks](#locks-migration-and-release-modes) for the full state machine and why the release-mode handoff exists.*
+> *See [Detailed docs → Locks](#1-locks-migration-and-release-modes) for the full state machine and why the release-mode handoff exists.*
 
 
 ### 7. Deploy your code, then release
@@ -293,15 +292,20 @@ If you now run `npx electrodb-migrations apply --remote`, the framework will sen
 - All CLI commands that interact with the database (apply, release, finalize, rollback) can be run with the `--remote` flag to execute them on AWS instead of locally. This way your CLI does not need direct access to the database and can leverage the cloud for execution.
 
 #### 3.2 Long-running server approach
-For long-running migrations that exceed Lambda's limits, you can run the framework inside a long-running Node process on an EC2 instance or a container in ECS/EKS. The framework does not provide a server implementation, but you can easily build one using the migrations client. See [detailed docs](#running-on-a-long-running-migration-server) for more information.
+For long-running migrations that exceed Lambda's limits, you can run the framework inside a long-running Node process on an EC2 instance or a container in ECS/EKS. The framework does not provide a server implementation, but you can easily build one using the migrations client. See [detailed docs](#3-running-on-a-long-running-migration-server) for more information.
 
 ---
 
-## Concepts
+## Detailed docs
 
-### Locks: migration and release modes
+Deep dives on the parts of the framework you don't need on day one.
+
+### 1. Locks: migration and release modes
 
 The framework holds a single global lock on your table while a migration is in progress. The lock has two distinct states.
+
+> **Warning — lock scope is table-wide.**  
+> *The lock applies to the entire DynamoDB table, not just the entity being migrated. If your table holds ten entities and you migrate one, the [guard wrapper](#1-wrap-your-dynamodb-client-with-the-migration-guard) rejects traffic for all ten — every entity on that table takes the migration's downtime. This is the simple correct default for v0.1; per-entity lock scoping is on the roadmap.*
 
 **Migration mode.** Held while `apply` is actively scanning, transforming, and writing v2 records. Concurrent migration runners are blocked. If you've wired the [guard wrapper](#1-wrap-your-dynamodb-client-with-the-migration-guard), app traffic is rejected for the duration.
 
@@ -321,7 +325,7 @@ This two-state design lets you run database migrations and code deploys *in the 
 > **Warning:**  
 > *`unlock` assumes no runner is actually alive. If a runner is still working when you unlock, you will corrupt the migration state. The CLI prompts for confirmation by default and will tell you which runId currently holds the lock.*
 
-### Rollback
+### 2. Rollback
 
 Rollback is gated by the same global lock as `apply`. It always takes a specific migration id and the framework refuses to roll back anything other than the **head** — the most recent applied (and not yet reverted) migration on that entity. No skipping, no cascades. To roll back further, roll back the head, then the new head, and so on.
 
@@ -335,55 +339,110 @@ The lock is symmetric with `apply`: rollback enters migration mode, then transit
 
 What happens on disk depends on **where in the lifecycle** the migration is — specifically, whether `release` has already been called. That's the point at which app traffic could have written fresh v2 records that have no v1 mirror.
 
-#### Case 1 — Rollback before `release` (lock still in release mode)
+#### 2.1 Case 1 — Rollback before `release` (lock still in release mode)
 
 Every v2 record on disk is a transformed copy of a v1 record; v1 is intact. The framework deletes the v2 records. `down` is **not** required. Fully lossless.
 
 > **Note:**  
 > *This applies also for failed migrations that never made it to release mode.*
 
-#### Case 2 — Rollback after `release`, before `finalize` (lock cleared, app live)
+#### 2.2 Case 2 — Rollback after `release`, before `finalize` (lock cleared, app live)
 
-The app has been writing fresh v2 records. Some v2 records have no v1 mirror. This case has two options:
+The app has been writing under v2 between `release` and now, so the table is no longer a uniform pre-apply snapshot. Each primary key is in one of four states:
 
-##### Option A (the default)
-- With `down` defined: the framework runs `down(v2) → v1` against every v2 record (fresh and transformed alike), in detail:
-    - delete all existing v1 versions of that entity
-    - writes the recovered v1 through the `down` function
-    - deletes v2
-- Without `down`: the framework refuses with `RollbackNotPossibleError({ reason: 'no-down-fn' })`
+| Type | v1 on disk? | v2 on disk? | Meaning                                                                                  |
+|------|-------------|-------------|------------------------------------------------------------------------------------------|
+| A    | yes         | yes         | Old record. v1 is the apply-time snapshot; v2 may have been *updated* by the live app.   |
+| B    | no          | yes         | Fresh record. Created by the live app post-release. No v1 mirror.                        |
+| C    | yes         | no          | Old record *deleted* by the live app post-release. v1 mirror still on disk.              |
+| D    | no          | no          | Created and deleted post-release. Nothing to do.                                         |
 
-##### Option B
-- must be explicitly opted into with `--dangerously-discard-new-data`
-- The framework deletes every v2 record, including fresh ones with no v1 mirror
+What you want done with each type depends on whether you trust the app's post-release activity. The framework offers three named strategies; pick one with `--strategy <name>`. For anything beyond these, ship a `rollbackResolver` and use `--strategy custom`.
 
-#### Case 3 — Rollback after `finalize`
+##### 2.2.1 `projected` (default; requires `down`)
 
-The v1 records are already gone. `down` is **required**; without it the framework throws `RollbackNotPossibleError({ reason: 'no-down-fn' })`. Algorithm is identical to Case 2 with `down`.
+The post-release v2 state is the truth. Project it back through `down()` to rebuild v1.
 
-#### Refusal cases
+| Type | Action                                                                          |
+|------|---------------------------------------------------------------------------------|
+| A    | Run `down(v2)`. Overwrites the original v1 with the down-derived version.       |
+| B    | Run `down(v2)`. Writes a derived v1. Fresh records preserved.                   |
+| C    | Delete the v1 mirror. Honors the app-side deletion.                             |
+
+Net: v1 ≡ projection of v2 through `down`. Lossless with respect to post-release activity. **Discards** the *original* v1 records — they're overwritten by the down-derived versions.
+
+##### 2.2.2 `snapshot` (works without `down`)
+
+Restore v1 to its state at apply time. The post-release period is treated as if it never happened.
+
+| Type | Action                                                                          |
+|------|---------------------------------------------------------------------------------|
+| A    | Keep the original v1. Ignores post-release updates.                             |
+| B    | Delete the v2. Fresh records lost.                                              |
+| C    | Keep the v1. Resurrects app-deleted records.                                    |
+
+Net: v1 ≡ snapshot at apply time. Loses everything that happened post-release. Use this when post-release writes are known-bad and you explicitly want to discard them.
+
+> **Warning:**  
+> *`snapshot` deletes every fresh v2 record (Type B) without recovery, and resurrects every app-deleted record (Type C). The CLI prints both counts and prompts for confirmation before proceeding.*
+
+##### 2.2.3 `fill-only` (hybrid; requires `down`)
+
+Keep originals where they exist; fill in from v2 only where they don't.
+
+| Type | Action                                                                          |
+|------|---------------------------------------------------------------------------------|
+| A    | Keep the original v1. Ignores post-release updates.                             |
+| B    | Run `down(v2)`. Fills in fresh records.                                         |
+| C    | Keep the v1. Resurrects app-deleted records.                                    |
+
+Net: original v1 ∪ down-derived fills. Closest to "every record I ever had still persists, in v1 shape."
+
+##### 2.2.4 `custom` (advanced; requires `rollbackResolver`)
+
+For per-field merge or any logic the named strategies don't cover, ship a resolver function on the migration:
+
+```ts
+defineMigration({
+  // ...
+  down: async (v2) => v1,
+  rollbackResolver: async ({
+    kind,        // 'A' | 'B' | 'C'
+    v1Original,  // undefined for B
+    v2,          // undefined for C
+    down,        // (v2) => Promise<V1>
+  }) => {
+    // return a v1 record to write, or null to delete this primary key
+  },
+});
+```
+
+Invoked with `--strategy custom`. The framework refuses at start time if `rollbackResolver` isn't defined on the migration.
+
+#### 2.3 Case 3 — Rollback after `finalize`
+
+The v1 records are already gone, so every v2 record is effectively Type B. Only `projected` is sensible — `snapshot` has nothing to keep, `fill-only` has nothing to fall back to. The framework refuses both on a finalized migration.
+
+`down` is **required**; without it the framework throws `RollbackNotPossibleError({ reason: 'no-down-fn' })`. `--strategy custom` is permitted if a `rollbackResolver` is defined; the resolver will only ever see `kind: 'B'` in this case.
+
+#### 2.4 Refusal cases
 
 - A newer applied migration exists for the same entity → `RollbackOutOfOrderError`.
 - The migration is `pending` or already `reverted` → friendly no-op message.
-- Case 2 without `down` and without `--dangerously-discard-new-data` → `RollbackNotPossibleError({ reason: 'no-down-fn' })`.
-- Case 3 without `down` → `RollbackNotPossibleError({ reason: 'no-down-fn' })`.
+- `--strategy projected` or `fill-only` without `down` defined → `RollbackNotPossibleError({ reason: 'no-down-fn' })`.
+- `--strategy custom` without `rollbackResolver` defined → `RollbackNotPossibleError({ reason: 'no-resolver' })`.
+- `--strategy snapshot` or `fill-only` on a finalized migration → `RollbackNotPossibleError({ reason: 'finalized-only-projected' })`.
 
 > **Note:**  
 > *If you have multiple unfinalized migrations stacked on top of each other, each one carries its own gap window from when it was released. The head rule keeps each rollback to one decision at a time — the framework does not cascade.*
 
----
-
-## Detailed docs
-
-Deep dives on the parts of the framework you don't need on day one.
-
-### Running on a long-running migration server
+### 3. Running on a long-running migration server
 
 The Lambda approach in [Recommended → Performance](#3-performance---running-migration-on-aws) is the simplest path, but it's bounded by Lambda's 15-minute execution limit. For large tables run the framework inside a long-running Node process — typically an ECS task, an EC2 instance, or any container.
 
 The framework does not ship a server. It gives you a migrations client; you decide how to receive commands and route them to it.
 
-#### What your server process does
+#### 3.1 What your server process does
 
 Inside your handler you import the migrations and build a single migrations client. Reuse it across requests; it caches the lock state and other metadata.
 
@@ -401,7 +460,7 @@ const migrate = createMigrationsClient({
 });
 ```
 
-#### Invoking the migrations client
+#### 3.2 Invoking the migrations client
 
 The client exposes one method per CLI command. Each one acquires the lock, does its work, and releases or transitions it as appropriate.
 
@@ -428,12 +487,12 @@ Errors thrown by these methods are instances of `ElectroDBMigrationError`. The m
 
 - `MigrationLockHeldError` — another runner holds the lock.
 - `RequiresRollbackError` — a previous `apply` failed mid-run; the head migration must be rolled back before any new `apply`.
-- `RollbackNotPossibleError` — `down` is missing in a case that requires it (see [Concepts → Rollback](#rollback)).
+- `RollbackNotPossibleError` — `down` is missing in a case that requires it (see [Detailed docs → Rollback](#2-rollback)).
 - `RollbackOutOfOrderError` — the requested migration is not the head.
 
 Errors are split into two categories: **start errors** (validation, lock held, no migrations to run) are thrown synchronously by `runInBackground` before a `runId` is issued. **Run errors** (failures during execution) surface on the snapshot returned by `getRunStatus` as `{ status: 'failed', error: { code, message, details } }`.
 
-#### HTTP wire contract for `--remote`
+#### 3.3 HTTP wire contract for `--remote`
 
 If you want the local CLI's `--remote` flag to drive your server, your endpoint has to accept the contract the CLI sends. Any transport works (HTTP, an SQS-fronted worker, an ECS RunTask invocation) — but `--remote` itself is HTTPS and posts a single shape:
 
@@ -452,7 +511,7 @@ Per-command body and success response:
 | command    | sync/async | args                                                | response (success)                                           |
 |------------|------------|-----------------------------------------------------|--------------------------------------------------------------|
 | `apply`    | async      | `{}`                                                | `{ runId: string, status: 'started' }`                       |
-| `rollback` | async      | `{ migrationId: string, discardNewData?: boolean }` | `{ runId: string, status: 'started' }`                       |
+| `rollback` | async      | `{ migrationId: string, strategy?: 'projected' \| 'snapshot' \| 'fill-only' \| 'custom' }` | `{ runId: string, status: 'started' }`     |
 | `finalize` | async      | `{ migrationId?: string, all?: boolean }`           | `{ runId: string, status: 'started' }`                       |
 | `release`  | sync       | `{}`                                                | `{ released: true }`                                         |
 | `status`   | sync       | `{ runId: string }`                                 | see *status response* below                                  |
@@ -486,7 +545,7 @@ If a `start` request fails before a run is registered (lock held, validation err
 
 Your handler validates the api key, switches on `command`, and routes to `migrate.runInBackground(...)` for the async commands or `migrate.getRunStatus(...)` for `status`. The framework deliberately does not prescribe Express, Fastify, or Koa — pick what fits your stack.
 
-#### Operational notes
+#### 3.4 Operational notes
 
 The process must stay up for the duration of an `apply` or `rollback`. The framework holds the lock with periodic heartbeats; if the process dies mid-run, the lock falls back to its stale-takeover threshold (a few hours by default) before another runner can take over. Configure the heartbeat interval and stale threshold in `electrodb-migrations.config.ts`.
 
