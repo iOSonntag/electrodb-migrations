@@ -64,6 +64,7 @@ export default defineConfig({
   // optional:
   table: 'app-table',
   migrations: 'src/migrations',
+  keyFields: { pk: 'pk', sk: 'sk' }, // override if your table's primary-key attributes are not 'pk' / 'sk'
 });
 ```
 
@@ -327,12 +328,14 @@ export default defineConfig({
 });
 ```
 
-If you now run `npx electrodb-migrations apply --remote`, the framework will send the migration commands to your Lambda function, which will execute them in the cloud. 
+If you now run `npx electrodb-migrations apply --remote`, the framework will send the migration commands to your Lambda function, which will execute them in the cloud.
+
+**How the CLI orchestrates the run.** `apply` / `finalize --all` resolve the pending migration list **locally** (the CLI has the migration files and queries the table for current `_migrations` state), then loop through that list and POST one Lambda invocation per migration. Each invocation runs exactly one migration end-to-end — acquire migration-mode lock → transform → transition to release-mode → return — and the CLI polls its `runId` until terminal before issuing the next one. "Apply all" is never one Lambda call.
 
 **Important Notes:**
 
-- It does use one function invocation per migration in sequence order so each single migration has 15 minutes to complete. For most use cases this is sufficient, but do your own due diligence on the expected runtime of your migrations.
-- Make sure you table has sufficient read/write capacity to handle the migration workload, especially if you have a large dataset. Consider using on-demand capacity or temporarily increasing provisioned capacity during the migration.
+- One function invocation per migration in sequence — so each single migration has the full 15-minute Lambda budget. For most use cases this is sufficient, but do your own due diligence on the expected runtime of any one migration.
+- Make sure your table has sufficient read/write capacity to handle the migration workload, especially if you have a large dataset. Consider using on-demand capacity or temporarily increasing provisioned capacity during the migration.
 - All CLI commands that interact with the database (apply, release, finalize, rollback) can be run with the `--remote` flag to execute them on AWS instead of locally. This way your CLI does not need direct access to the database and can leverage the cloud for execution.
 
 #### 2.2 Long-running server approach
@@ -679,12 +682,14 @@ Per-command body and success response:
 
 | command    | sync/async | args                                                | response (success)                                           |
 |------------|------------|-----------------------------------------------------|--------------------------------------------------------------|
-| `apply`    | async      | `{}`                                                | `{ runId: string, status: 'started' }`                       |
+| `apply`    | async      | `{ migrationId: string }`                           | `{ runId: string, status: 'started' }`                       |
 | `rollback` | async      | `{ migrationId: string, strategy?: 'projected' \| 'snapshot' \| 'fill-only' \| 'custom' }` | `{ runId: string, status: 'started' }`     |
-| `finalize` | async      | `{ migrationId?: string, all?: boolean }`           | `{ runId: string, status: 'started' }`                       |
+| `finalize` | async      | `{ migrationId: string }`                           | `{ runId: string, status: 'started' }`                       |
 | `release`  | sync       | `{}`                                                | `{ released: true }`                                         |
 | `status`   | sync       | `{ runId: string }`                                 | see *status response* below                                  |
 | `unlock`   | sync       | `{ runId?: string }`                                | `{ unlocked: true, markedFailed: string[] }`                 |
+
+Each async command targets exactly one migration. The CLI's `apply` / `finalize --all` commands are CLI-tier loops that resolve the pending list locally and POST one request per migration in sequence — "apply all" or "finalize all" never crosses the wire as a single call. This is what gives every migration its own 15-minute Lambda budget instead of forcing the whole batch through one invocation.
 
 Status response shape:
 
@@ -692,19 +697,18 @@ Status response shape:
 {
   "status": "running" | "completed" | "failed",
   "command": "apply" | "rollback" | "finalize",
-  "progress": {
-    "phase": "scanning" | "transforming" | "writing" | "deleting",
-    "currentMigrationId": "20260501083000-User-add-status",
-    "current": 200,
-    "total": 1000,
-    "elapsedMs": 30000
-  },
-  "result": { "applied": ["20260501083000-User-add-status"] },
+  "migrationId": "20260501083000-User-add-status",
+  "startedAt": "2026-05-01T08:30:00Z",
+  "elapsedMs": 30000,
+  "lastHeartbeatAt": "2026-05-01T08:30:28Z",
   "error": { "code": "EDBRollbackNotPossibleError", "message": "...", "details": { } }
 }
 ```
 
-`progress` is present while `status` is `running`. `result` is present once `status` is `completed`. `error` is present once `status` is `failed`.
+`error` is present once `status` is `failed`. The run targets exactly one migration, named by `migrationId` — no per-batch result aggregation, since a run is one lock cycle on one migration.
+
+> **Why no per-record progress counter or phase?**
+> *Tracking `current` / `total` would mean writing back to the lock row on every batch — contending with the heartbeat on the same hot key — and `total` isn't known without an extra full-table pre-scan. A coarser phase enum (`scanning` / `transforming` / ...) would still cost writes on the hot row for marginal value. **Heartbeat freshness is the load-bearing liveness signal**: if `lastHeartbeatAt` is recent, the runner is alive; if it has gone stale past the configured threshold, the lock is up for takeover. `elapsedMs` is derived from `startedAt` at read time, not stored.*
 
 If a `start` request fails before a run is registered (lock held, validation error, no migrations to run), the response is the synchronous error shape — no `runId` is issued:
 
