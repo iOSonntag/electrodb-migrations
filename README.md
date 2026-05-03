@@ -33,8 +33,7 @@ You keep a single source-of-truth entity file (e.g. `src/database/entities/user.
 
 ## Quick start
 
-> **Heads up:**  
-> *Quick start covers the production-safe baseline. For best practices around CI gating, multi-developer teams, large datasets, and testing, read the [Recommended](#recommended) section before going to production.*
+> *Quick start covers the production-safe baseline. For CI gating, multi-developer teams, large datasets, testing, and cross-entity reads, read [Recommended](#recommended) before going to production.*
 
 ### 1. Initialize
 
@@ -42,46 +41,30 @@ You keep a single source-of-truth entity file (e.g. `src/database/entities/user.
 npx electrodb-migrations init
 ```
 
-Creates:
-
-```
-.electrodb-migrations/                # framework-managed state (do not edit or delete)
-src/database/migrations/              # actual migrations (edit these)
-electrodb-migrations.config.ts        # framework configuration
-```
-
-> **Commit `.electrodb-migrations/`** along with your code.  
-> *Despite being framework-managed, this directory holds the drift snapshots that CI's `validate` gate compares against. See [Recommended → Multi-developer workflow](#3-multi-developer-workflow) for resolving merge conflicts when two branches scaffold a migration in parallel.*
-
-The config is a `.ts` file so you can dynamically set the table name from env vars, SST `Resource` references, etc.
+Creates `.electrodb-migrations/` (framework-managed state — commit it alongside your code) and `electrodb-migrations.config.ts` pre-populated with options you might want to customize. Every option is optional; see [§5.1](#51-the-config-file) for the full list.
 
 ```ts
 // electrodb-migrations.config.ts
 import { defineConfig } from 'electrodb-migrations';
 
-// Every option below is optional. `init` generates this file pre-populated with sensible defaults.
 export default defineConfig({
-  entities: 'src/database/entities',                // pass a list for explicit control
+  entities: 'src/database/entities',
   migrations: 'src/database/migrations',
-  tableName: 'app-table',                           // or pass via --table / runtime arg
-  keyNames: { partitionKey: 'pk', sortKey: 'sk' },  // override if your table's primary-key attributes are renamed
+  tableName: 'app-table',
 });
 ```
 
-> *Other supported extensions and the full option list live in [§5.1](#51-the-config-file).*
-
-
 ### 2. Baseline an existing project
-
-If your entities already exist in production, snapshot them so the framework knows the current shape is the starting point:
 
 ```sh
 npx electrodb-migrations baseline
 ```
 
-This writes one snapshot per entity into the framework's internal state without scaffolding any migration. Skip this for greenfield projects — your first `create` will produce the first snapshot.
+Snapshots every entity's current shape so the framework treats production as the starting point. Skip for greenfield projects — your first `create` produces the first snapshot.
 
 ### 3. Edit your entity
+
+Change anything including adding/removing indexes and changing primary keys (except `model.entity` and `model.service`). Don't bump `model.version` — the framework does it for you.
 
 ```ts
 // src/database/entities/user.ts
@@ -98,39 +81,25 @@ export const User = new Entity({
 });
 ```
 
-You add `status`. You **don't** have to bump `model.version` — the framework does that for you.
-
-> **Note:**  
-> *You are allowed to completely change the entity shape in this step, including adding or removing indexes, changing the primary index shape, etc. Only `model.entity` and `model.service` must stay the same.*
-
 ### 4. Scaffold the migration
 
 ```sh
 npx electrodb-migrations create --entity User --name add-status
 ```
 
-> **Note:**  
-> *The framework only detects shape drift (attributes, keys, indexes). Behavior-only changes (validators, getters, sparse-index `condition` functions) don't trigger drift; if you know your behavior change needs data work, scaffold with `create --force` anyway.*
+The framework generates the migration folder, bumps `model.version` from `'1'` to `'2'` in your entity file (its only edit to your source), updates the snapshot, and prints the diff:
 
-The framework:
+```
+migrations/20260501083000-User-add-status/
+├── v1.ts              # frozen previous shape
+├── v2.ts              # frozen new shape
+└── migration.ts       # up() stub for you to fill in
 
-1. Generates the migration folder:
+User: v1 → v2
+  + status: 'active' | 'inactive'  (required)  ⚠ NEEDS DEFAULT IN up()
+```
 
-   ```
-   migrations/20260501083000-User-add-status/
-   ├── v1.ts              # frozen schema-only copy of the previous version
-   ├── v2.ts              # frozen schema-only copy of the new version
-   └── migration.ts       # actual migration with an up() stub for you to fill in
-   ```
-
-2. Bumps `model.version: '1'` → `model.version: '2'` in `src/database/entities/user.ts` (the *only* edit it makes to your source).
-3. Updates its internal snapshot.
-4. Prints the schema diff so you know what `up()` needs to handle:
-
-   ```
-   User: v1 → v2
-     + status: 'active' | 'inactive'  (required)  ⚠ NEEDS DEFAULT IN up()
-   ```
+Behavior-only changes (validators, getters, conditions for sparce indexes) don't trigger drift; pass `--force` if you know one needs data work — see [§10.2](#102-what-does-not-count-as-drift-behavior-only-changes).
 
 ### 5. Fill in the transform
 
@@ -145,83 +114,32 @@ export default defineMigration({
   entityName: 'User',
   from: UserV1,
   to: UserV2,
-  up: async (user) => ({
-    ...user,
-    status: 'active' as const,
-  }),
+  up: async (user) => ({ ...user, status: 'active' as const }),
   // down: async (user) => { const { status: _s, ...v1 } = user; return v1; },
 });
 ```
 
-`up` is required, `down` is optional but required for post-finalize rollback.
-
-**Reading related records during the transform.** Both `up` and `down` receive a second arg `ctx`. Use `ctx.entity(SomeEntity)` to read related records — never your app's regular entity imports, which route through the [guard wrapper](#6-wrap-your-dynamodb-client-with-the-migration-guard) and will throw during a migration.
-
-```ts
-import { Team } from '../../entities/team.js';
-
-// inside defineMigration({...}):
-up: async (user, ctx) => {
-  const team = await ctx.entity(Team).get({ id: user.teamId }).go();
-  return { ...user, teamName: team.data.name };
-},
-```
-
-Reads only — writes through `ctx` throw. Reading the entity currently being migrated (`ctx.entity(User)` from inside a User migration) also throws: the on-disk state is mid-flight and reads would be order-dependent.
-
-> **⚠ Highly discouraged unless you actually need it.**  
-> *Every read fires once per record, serially. A migration over a million rows that does one extra read per row issues a million extra `GetItem` calls — dramatically slowing the run and extending the lock window. Prefer denormalizing the value differently, or pre-loading the lookup data into memory in your runner before calling `apply`. See [Recommended → Reading from other entities](#5-reading-from-other-entities-during-a-migration) for the ordering rule that keeps these reads safe.*
+`up` is required; `down` is optional but required for post-finalize rollback. To read related entities inside the transform, see [Recommended → Reading from other entities](#5-reading-from-other-entities-during-a-migration).
 
 ### 6. Wrap your DynamoDB client with the migration guard
 
-While a migration is running, has failed, or is in release mode, you do **not** want app traffic hitting the database. Data consistency is not guaranteed during these states — there is no live caching of database writes in the current version, meaning the migration **has** downtime.
-
-> **Note:**  
-> *Zero downtime might be possible in the future, see [Future plans](#14-future-plans).*
-
-The guard wrapper is a thin DynamoDB client wrapper that intercepts every call and throws `EDBMigrationInProgressError` instead of going to the wire.
+A migration **has** downtime: app traffic must not hit the table while the lock is held. The guard wrapper rejects every guarded call with `EDBMigrationInProgressError` for the duration.
 
 ```ts
 import { createMigrationsClient } from 'electrodb-migrations';
 
-const client = new DynamoDBClient(...); // OR DynamoDBDocumentClient
-
+const client = new DynamoDBClient(...); // or DynamoDBDocumentClient
 const migrate = createMigrationsClient({ config, client });
-
 const guarded = migrate.guardedClient();
 
 // Use `guarded` for every Entity (and Service) in your app:
 const User = new Entity(userSchema, { client: guarded, table });
 ```
 
-The migration runner uses the unwrapped client and keeps working while the wrapper rejects app traffic. Cost is one cached `GetItem` per five seconds per process at most — negligible compared to silent corruption from a stale schema reading new-format data.
+Surface the error as HTTP 503 with `Retry-After` so clients back off automatically — see [§9.3](#93-edbmigrationinprogresserror) for the recommended handler pattern.
 
-> **Why is caching for five seconds safe?**  
-> *The migration runner first acquires the lock and then waits 15 seconds before starting the actual migration. See [§5.3](#53-lock-and-guard-timing-safety-invariant) for the safety invariant; both intervals are configurable in [§5.1](#51-the-config-file).*
-
-> **Important Note:**  
->*If you already shipped production code and are adopting the framework, make sure to deploy the guard wrapper before you run your first `apply`. Otherwise, if you run `apply` without the guard in place, there is a window where the migration is running but app traffic is not blocked, which can lead to silent corruption.*
-
-#### Handling `EDBMigrationInProgressError` in your app
-
-When the wrapper fires, every guarded call throws `EDBMigrationInProgressError`. The recommended pattern is to surface it as HTTP 503 with `Retry-After` so load balancers and HTTP clients back off automatically:
-
-```ts
-import { isMigrationInProgress } from 'electrodb-migrations';
-
-// Example: Express error middleware. Adapt to your HTTP framework.
-app.use((err, req, res, next) => {
-  if (isMigrationInProgress(err)) {
-    res.set('Retry-After', '30'); // pick a value that fits your expected migration runtime
-    return res.status(503).json({ error: 'Migration in progress' });
-  }
-  next(err);
-});
-```
-
-`isMigrationInProgress(err)` is a duck-typed checker; prefer it over `instanceof EDBMigrationInProgressError`, which is fragile under dual ESM/CJS. The thrown error's `details` field carries lock metadata (the current `runId`, the lock state) if you want to log it.
-
-The framework deliberately does **not** prescribe a `Retry-After` value — your migration's expected runtime is your call.
+> **⚠ Deploy the guard before your first `apply`.**  
+> *Without it, app traffic hits the table mid-migration and may silently corrupt data.*
 
 ### 7. Apply
 
@@ -229,19 +147,7 @@ The framework deliberately does **not** prescribe a `Retry-After` value — your
 npx electrodb-migrations apply
 ```
 
-What happens:
-
-- Acquires the **migration lock** on the table — blocks concurrent migration runners and, if you've wired the guard wrapper, app traffic too.
-- Scans v1 records, runs your `up()` against each, writes v2 records alongside.
-- Both versions coexist on disk. ElectroDB's identity stamps mean v1 reads see only v1, v2 reads see only v2.
-- On success, marks the migration `applied` and transitions the lock to **release mode** — still gates app traffic until you call `release` after deploying your new code, but does **not** gate the migration runner itself.
-
-> **Note:**  
-> *Multiple pending migrations are applied back-to-back in a single `apply` invocation. The release-mode handoff between them is internal to the runner — the next pending migration re-enters migration mode immediately, without a manual `release` in between. App traffic stays gated continuously from the first migration's start until you call `release` after deploying your new code.*
-
-> **Want details on the lock?**  
-> *See [Docs → Locks](#1-locks-migration-release-and-maintenance-modes) for the full state machine and why the release-mode handoff exists.*
-
+Acquires the migration lock, scans v1 records, runs `up()` against each, and writes v2 records alongside. Both versions coexist on disk; ElectroDB's identity stamps route v1 reads to v1 records and v2 to v2. On success, the lock transitions to **release mode** — still gating app traffic, no longer gating the migration runner. Multiple pending migrations apply back-to-back in a single invocation. Full state machine in [§1 Locks](#1-locks-migration-release-and-maintenance-modes).
 
 ### 8. Deploy your code, then release
 
@@ -251,11 +157,11 @@ Deploy the version of your app that uses the new entity shape. Once it's live an
 npx electrodb-migrations release
 ```
 
-The release lock is cleared. Traffic flows.
+The release lock clears. Traffic flows.
 
 ### 9. Finalize
 
-After a bake window where you're satisfied nothing is broken, finalize the migration:
+After a bake window where nothing is broken:
 
 ```sh
 npx electrodb-migrations finalize 20260501083000-User-add-status
@@ -263,12 +169,8 @@ npx electrodb-migrations finalize 20260501083000-User-add-status
 npx electrodb-migrations finalize --all
 ```
 
-Deletes the v1 records. Marks the migration `finalized`. Permanent.
+Deletes the v1 records and marks the migration `finalized`. Permanent. Acquires the lock in **maintenance mode** — concurrent runners blocked, but app traffic unaffected (the table is in a v2-only steady state). You can defer finalize for weeks; it's an optimization, not a requirement.
 
-`finalize` acquires the lock in **maintenance mode** — concurrent runners are still blocked, but app traffic is **not** gated by the guard wrapper. By this point the table is in a v2-only steady state, so there is no schema mismatch a guarded call could hit. See [Docs → Locks](#1-locks-migration-release-and-maintenance-modes) for the full state machine.
-
-> **Note:**  
-> *Nothing forces you to finalize a migration — you can keep the older data on disk for months. It depends on your use case whether you need to optimize DynamoDB storage cost and performance, and on which behavior you want on rollbacks.*
 ---
 
 ## Recommended
@@ -399,7 +301,7 @@ See [Docs → Testing migrations](#8-testing-migrations) for the full case-shape
 
 ### 5. Reading from other entities during a migration
 
-`up()` and `down()` receive a `ctx` argument (see [step 5](#5-fill-in-the-transform)). Through it you can read related records via `ctx.entity(Other)` — bound to the migration runner's unguarded client so it works while the lock is held. **Don't reach for this lightly.**
+`up()` and `down()` receive a second `ctx` argument. Use `ctx.entity(Other)` to read related records — bound to the migration runner's unguarded client so it works while the lock is held. Reads only: writes through `ctx` throw, and reading the entity currently being migrated (`ctx.entity(User)` from inside a User migration) also throws — its on-disk state is mid-flight and reads would be order-dependent. **Don't reach for this lightly.**
 
 > **⚠ Discouraged by default — every read multiplies your migration runtime.**  
 > *Reads inside `up()`/`down()` fire once per record, serially against your migration's throughput budget. Over a million-row table, one extra read per row is a million extra `GetItem` calls before the migration can finish — and the lock stays held the whole time. Almost always faster: denormalize differently, or pre-load the lookup table into memory in your runner before invoking `apply`.*
@@ -1094,7 +996,26 @@ describe('add-status migration', () => {
 
 #### 9.3 EDBMigrationInProgressError
 
-Thrown by the [migration guard](#6-wrap-your-dynamodb-client-with-the-migration-guard) when the app tries to read or write while the lock is held. See the linked section for the recommended 503 + `Retry-After` handling pattern and the `isMigrationInProgress(err)` helper.
+Thrown by the [migration guard](#6-wrap-your-dynamodb-client-with-the-migration-guard) when the app tries to read or write while the lock is held.
+
+The recommended pattern is to surface it as HTTP 503 with `Retry-After` so load balancers and HTTP clients back off automatically:
+
+```ts
+import { isMigrationInProgress } from 'electrodb-migrations';
+
+// Example: Express error middleware. Adapt to your HTTP framework.
+app.use((err, req, res, next) => {
+  if (isMigrationInProgress(err)) {
+    res.set('Retry-After', '30'); // pick a value that fits your expected migration runtime
+    return res.status(503).json({ error: 'Migration in progress' });
+  }
+  next(err);
+});
+```
+
+`isMigrationInProgress(err)` is a duck-typed checker; prefer it over `instanceof EDBMigrationInProgressError`, which is fragile under dual ESM/CJS. The thrown error's `details` field carries lock metadata (the current `runId`, the lock state) if you want to log it.
+
+The framework deliberately does **not** prescribe a `Retry-After` value — your migration's expected runtime is your call.
 
 #### 9.4 EDBRequiresRollbackError
 
@@ -1112,7 +1033,29 @@ Thrown by the [migration guard](#6-wrap-your-dynamodb-client-with-the-migration-
 
 #### 10.1 What counts as drift
 
+The framework compares each entity to its last snapshot in `.electrodb-migrations/` and reports any change to the on-disk shape:
+
+- **Attributes** — added, removed, retyped, or with their `required` flag toggled.
+- **Primary index** — partition or sort key composition, including field order and any prefix.
+- **Secondary indexes (GSIs / LSIs)** — added, removed, or with their key composition changed.
+
+`create` reacts to any of these by scaffolding a migration and bumping `model.version`. Anything outside this list is behavior-only — see [§10.2](#102-what-does-not-count-as-drift-behavior-only-changes).
+
 #### 10.2 What does NOT count as drift (behavior-only changes)
+
+Some entity changes don't alter the on-disk shape and so don't trigger drift:
+
+- **Validators** on attributes.
+- **Getters** and other format-time functions.
+- **Sparse-index `condition` functions** that decide whether a record participates in a GSI.
+
+These run at read or write time and don't change what's persisted. The framework can't tell from the snapshot whether your behavior change requires existing records to be rewritten — that's your call. If it does, scaffold the migration anyway with `--force`:
+
+```sh
+npx electrodb-migrations create --entity User --name normalize-email --force
+```
+
+The transform you write decides whether each record needs rewriting; `--force` only unlocks the scaffold step.
 
 #### 10.3 Snapshot storage layout
 
