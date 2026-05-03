@@ -40,9 +40,7 @@ describe('renderSchemaDiff — attribute-added', () => {
       },
     ];
     const out = renderSchemaDiff(drifts, OPTS);
-    expect(out).toBe(
-      `User: v1 → v2\n  + status: 'active' | 'inactive' (required) ⚠ NEEDS DEFAULT IN up()\n`,
-    );
+    expect(out).toBe(`User: v1 → v2\n  + status: 'active' | 'inactive' (required) ⚠ NEEDS DEFAULT IN up()\n`);
   });
 
   it('non-required suppresses warning', () => {
@@ -55,17 +53,13 @@ describe('renderSchemaDiff — attribute-added', () => {
         warnNeedsDefault: false,
       },
     ];
-    expect(renderSchemaDiff(drifts, OPTS)).toBe(
-      'User: v1 → v2\n  + nickname: string (optional)\n',
-    );
+    expect(renderSchemaDiff(drifts, OPTS)).toBe('User: v1 → v2\n  + nickname: string (optional)\n');
   });
 });
 
 describe('renderSchemaDiff — attribute-removed', () => {
   it('emits "- <name>: <type>"', () => {
-    const drifts: Drift[] = [
-      { kind: 'attribute-removed', name: 'status', type: 'string' },
-    ];
+    const drifts: Drift[] = [{ kind: 'attribute-removed', name: 'status', type: 'string' }];
     expect(renderSchemaDiff(drifts, OPTS)).toBe('User: v1 → v2\n  - status: string\n');
   });
 });
@@ -79,9 +73,7 @@ describe('renderSchemaDiff — attribute-changed', () => {
         changes: [{ field: 'type', from: 'string', to: 'number' }],
       },
     ];
-    expect(renderSchemaDiff(drifts, OPTS)).toBe(
-      `User: v1 → v2\n  ~ status: 'string' → 'number'\n`,
-    );
+    expect(renderSchemaDiff(drifts, OPTS)).toBe(`User: v1 → v2\n  ~ status: 'string' → 'number'\n`);
   });
 
   it('multiple changes render header line + indented sub-lines', () => {
@@ -95,9 +87,7 @@ describe('renderSchemaDiff — attribute-changed', () => {
         ],
       },
     ];
-    expect(renderSchemaDiff(drifts, OPTS)).toBe(
-      `User: v1 → v2\n  ~ status\n    ↳ required: false → true\n    ↳ type: 'string' → 'number'\n`,
-    );
+    expect(renderSchemaDiff(drifts, OPTS)).toBe(`User: v1 → v2\n  ~ status\n    ↳ required: false → true\n    ↳ type: 'string' → 'number'\n`);
   });
 });
 
@@ -111,15 +101,11 @@ describe('renderSchemaDiff — index-added', () => {
         skComposite: ['createdAt'],
       },
     ];
-    expect(renderSchemaDiff(drifts, OPTS)).toBe(
-      'User: v1 → v2\n  + index secondary: pk=[email], sk=[createdAt]\n',
-    );
+    expect(renderSchemaDiff(drifts, OPTS)).toBe('User: v1 → v2\n  + index secondary: pk=[email], sk=[createdAt]\n');
   });
 
   it('without sk: only pk composite array', () => {
-    const drifts: Drift[] = [
-      { kind: 'index-added', name: 'bare', pkComposite: ['x'] },
-    ];
+    const drifts: Drift[] = [{ kind: 'index-added', name: 'bare', pkComposite: ['x'] }];
     expect(renderSchemaDiff(drifts, OPTS)).toBe('User: v1 → v2\n  + index bare: pk=[x]\n');
   });
 });
@@ -140,9 +126,7 @@ describe('renderSchemaDiff — index-changed', () => {
         changes: [{ field: 'pk.composite', from: ['id'], to: ['userId'] }],
       },
     ];
-    expect(renderSchemaDiff(drifts, OPTS)).toBe(
-      'User: v1 → v2\n  ~ index primary.pk.composite: [id] → [userId]\n',
-    );
+    expect(renderSchemaDiff(drifts, OPTS)).toBe('User: v1 → v2\n  ~ index primary.pk.composite: [id] → [userId]\n');
   });
 
   it('multiple changes render header + indented sub-lines', () => {
@@ -156,29 +140,21 @@ describe('renderSchemaDiff — index-changed', () => {
         ],
       },
     ];
-    expect(renderSchemaDiff(drifts, OPTS)).toBe(
-      `User: v1 → v2\n  ~ index primary\n    ↳ pk.casing: 'default' → 'lower'\n    ↳ pk.composite: [id] → [id, tenant]\n`,
-    );
+    expect(renderSchemaDiff(drifts, OPTS)).toBe(`User: v1 → v2\n  ~ index primary\n    ↳ pk.casing: 'default' → 'lower'\n    ↳ pk.composite: [id] → [id, tenant]\n`);
   });
 });
 
 describe('renderSchemaDiff — key-rename', () => {
   it('emits "~ rename <index>.<keyType>: <from> → <to>"', () => {
-    const drifts: Drift[] = [
-      { kind: 'key-rename', index: 'primary', keyType: 'pk', from: 'userId', to: 'accountId' },
-    ];
-    expect(renderSchemaDiff(drifts, OPTS)).toBe(
-      'User: v1 → v2\n  ~ rename primary.pk: userId → accountId\n',
-    );
+    const drifts: Drift[] = [{ kind: 'key-rename', index: 'primary', keyType: 'pk', from: 'userId', to: 'accountId' }];
+    expect(renderSchemaDiff(drifts, OPTS)).toBe('User: v1 → v2\n  ~ rename primary.pk: userId → accountId\n');
   });
 });
 
 describe('renderSchemaDiff — entity-removed', () => {
   it('emits "⨯ entity-removed: <Entity> (service: <service>)"', () => {
     const drifts: Drift[] = [{ kind: 'entity-removed', entity: 'User', service: 'app' }];
-    expect(renderSchemaDiff(drifts, OPTS)).toBe(
-      'User: v1 → v2\n  ⨯ entity-removed: User (service: app)\n',
-    );
+    expect(renderSchemaDiff(drifts, OPTS)).toBe('User: v1 → v2\n  ⨯ entity-removed: User (service: app)\n');
   });
 });
 
@@ -199,9 +175,7 @@ describe('renderSchemaDiff — multi-kind composite', () => {
         changes: [{ field: 'field', from: 'email', to: 'emailAddr' }],
       },
     ];
-    expect(renderSchemaDiff(drifts, OPTS)).toBe(
-      `User: v1 → v2\n  + status: string (optional)\n  - oldField: number\n  ~ email: 'email' → 'emailAddr'\n`,
-    );
+    expect(renderSchemaDiff(drifts, OPTS)).toBe(`User: v1 → v2\n  + status: string (optional)\n  - oldField: number\n  ~ email: 'email' → 'emailAddr'\n`);
   });
 });
 
@@ -254,9 +228,7 @@ describe('renderSchemaDiff — colorizer adapter', () => {
       dim: (s) => `[D]${s}[/D]`,
       bold: (s) => `[B]${s}[/B]`,
     };
-    const drifts: Drift[] = [
-      { kind: 'attribute-removed', name: 'oldField', type: 'number' },
-    ];
+    const drifts: Drift[] = [{ kind: 'attribute-removed', name: 'oldField', type: 'number' }];
     const out = renderSchemaDiff(drifts, { ...OPTS, colorize });
     expect(out).toContain('[E]-[/E]');
   });

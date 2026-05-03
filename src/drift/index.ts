@@ -28,3 +28,6 @@ export type {
   IndexRemoved,
   KeyRename,
 } from './classify.js';
+
+export { renderSchemaDiff } from './diff.js';
+export type { Colorizer, RenderSchemaDiffOptions } from './diff.js';
