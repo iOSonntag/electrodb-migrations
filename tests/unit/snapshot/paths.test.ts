@@ -1,13 +1,6 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import {
-  JOURNAL_FILE_NAME,
-  META_FILE_NAME,
-  SNAPSHOTS_SUBDIR_NAME,
-  SNAPSHOT_DIR_NAME,
-  entitySnapshotPath,
-  snapshotPaths,
-} from '../../../src/snapshot/paths.js';
+import { JOURNAL_FILE_NAME, META_FILE_NAME, SNAPSHOTS_SUBDIR_NAME, SNAPSHOT_DIR_NAME, entitySnapshotPath, snapshotPaths } from '../../../src/snapshot/paths.js';
 
 describe('snapshot path constants', () => {
   it('matches RESEARCH Pattern 6 conventions', () => {
