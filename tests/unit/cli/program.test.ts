@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildProgram } from '../../../src/cli/program.js';
 
 describe('buildProgram (CLI-01 — global --config flag, FND-04 — bin program)', () => {
@@ -51,21 +51,26 @@ describe('buildProgram (CLI-01 — global --config flag, FND-04 — bin program)
     expect(subcommandNames).toContain('create');
   });
 
-  it('parses --version without throwing when exitOverride is set (returns 0.1.0)', async () => {
+  it('parses --version without throwing when exitOverride is set (returns 0.1.0)', () => {
     const program = buildProgram();
     program.exitOverride();
+    // commander prints the version to stdout. Silence the write so the test
+    // output stays clean while still asserting on the exit-override message.
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     let caught: unknown;
     try {
-      program.parse(['node', 'electrodb-migrations', '--version'], { from: 'user' });
+      program.parse(['--version'], { from: 'user' });
     } catch (e) {
       // commander throws CommanderError on --version under exitOverride. The
       // thrown error's message carries the version string.
       caught = e;
     }
-    // Either the exit was overridden (we land here) or commander returned cleanly.
-    if (caught !== undefined) {
-      const msg = (caught as Error).message;
-      expect(msg).toContain('0.1.0');
-    }
+    const writeCallCount = stdoutSpy.mock.calls.length;
+    stdoutSpy.mockRestore();
+    expect(caught).toBeDefined();
+    const msg = (caught as Error).message;
+    expect(msg).toContain('0.1.0');
+    // Confirm commander attempted to write the version to stdout.
+    expect(writeCallCount).toBeGreaterThan(0);
   });
 });
