@@ -71,3 +71,54 @@ describe('resolveConfig (CFG-11 precedence chain)', () => {
     });
   });
 });
+
+describe('resolveConfig — built-in path defaults (CFG-12)', () => {
+  it('fills entities + migrations from built-in defaults when both layers omit them', () => {
+    const out = resolveConfig({}, {});
+    expect(out.entities).toEqual(['src/database/entities']);
+    expect(out.migrations).toBe('src/database/migrations');
+  });
+
+  it('file-supplied entities still override the built-in default', () => {
+    const out = resolveConfig({ entities: 'custom/entities' });
+    expect(out.entities).toEqual(['custom/entities']);
+  });
+
+  it('override-supplied migrations wins over file and default', () => {
+    const out = resolveConfig({ migrations: 'file/path' }, { migrations: 'override/path' });
+    expect(out.migrations).toBe('override/path');
+  });
+
+  it('tableName widens to undefined when no layer supplies it (invariants narrows later)', () => {
+    const out = resolveConfig({});
+    expect(out.tableName).toBeUndefined();
+  });
+});
+
+describe('resolveConfig — remote section spread (entries #3 / #5)', () => {
+  it('returns remote: undefined when both layers omit it', () => {
+    const out = resolveConfig({});
+    expect(out.remote).toBeUndefined();
+  });
+
+  it('per-section spread: override.url + file.apiKey compose into one remote', () => {
+    const out = resolveConfig(
+      { remote: { url: 'u-from-file', apiKey: 'k-from-file' } },
+      { remote: { url: 'u-from-override' } },
+    );
+    expect(out.remote).toEqual({ url: 'u-from-override', apiKey: 'k-from-file' });
+  });
+
+  it('per-section spread: file.url + override.apiKey compose into one remote', () => {
+    const out = resolveConfig({ remote: { url: 'u1' } }, { remote: { apiKey: 'k1' } });
+    expect(out.remote).toEqual({ url: 'u1', apiKey: 'k1' });
+  });
+
+  it('override fields win on collision; file fields are retained for the rest', () => {
+    const out = resolveConfig(
+      { remote: { url: 'u-file', apiKey: 'k-file' } },
+      { remote: { url: 'u-override' } },
+    );
+    expect(out.remote).toEqual({ url: 'u-override', apiKey: 'k-file' });
+  });
+});

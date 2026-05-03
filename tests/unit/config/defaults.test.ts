@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_GUARD, DEFAULT_KEY_NAMES, DEFAULT_LOCK, DEFAULT_RUNNER } from '../../../src/config/defaults.js';
+import {
+  DEFAULT_ENTITIES_PATH,
+  DEFAULT_GUARD,
+  DEFAULT_KEY_NAMES,
+  DEFAULT_LOCK,
+  DEFAULT_MIGRATIONS_PATH,
+  DEFAULT_RUNNER,
+} from '../../../src/config/defaults.js';
 
 describe('DEFAULT_LOCK (CFG-06)', () => {
   it('heartbeatMs is 30_000', () => {
@@ -46,5 +53,15 @@ describe('DEFAULT_KEY_NAMES (CFG-05)', () => {
 describe('Cross-default invariant (Pitfall #2 sanity check)', () => {
   it('DEFAULT_GUARD.cacheTtlMs is strictly less than DEFAULT_LOCK.acquireWaitMs', () => {
     expect(DEFAULT_GUARD.cacheTtlMs).toBeLessThan(DEFAULT_LOCK.acquireWaitMs);
+  });
+});
+
+describe('DEFAULT_ENTITIES_PATH / DEFAULT_MIGRATIONS_PATH (CFG-12)', () => {
+  it("DEFAULT_ENTITIES_PATH is 'src/database/entities' (matches README §5.1.1)", () => {
+    expect(DEFAULT_ENTITIES_PATH).toBe('src/database/entities');
+  });
+
+  it("DEFAULT_MIGRATIONS_PATH is 'src/database/migrations' (matches README §5.1.1)", () => {
+    expect(DEFAULT_MIGRATIONS_PATH).toBe('src/database/migrations');
   });
 });

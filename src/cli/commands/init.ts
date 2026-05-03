@@ -17,7 +17,7 @@ const DEFAULT_CONFIG_CONTENT = [
   "import { defineConfig } from 'electrodb-migrations';",
   '',
   'export default defineConfig({',
-  "  entities: 'src/entities',",
+  "  entities: 'src/database/entities',",
   "  migrations: 'src/database/migrations',",
   "  tableName: () => process.env.TABLE_NAME ?? 'app_table',",
   '});',
@@ -85,7 +85,7 @@ export async function runInit(args: RunInitArgs): Promise<void> {
   log.info('');
   log.info('Next steps:');
   log.info('  1. Edit electrodb-migrations.config.ts to set tableName + region');
-  log.info('  2. Define your ElectroDB entities under src/entities/');
+  log.info('  2. Define your ElectroDB entities under src/database/entities/');
   log.info('  3. Run `electrodb-migrations baseline` to snapshot current shapes');
 }
 

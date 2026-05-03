@@ -80,3 +80,94 @@ describe('validateConfigInvariants — Pitfall #2 §5.3', () => {
     }
   });
 });
+
+describe('validateConfigInvariants — tableName (entry #4)', () => {
+  it('throws when tableName is undefined', () => {
+    const cfg: ResolvedConfig = { ...baseConfig, tableName: undefined as unknown as ResolvedConfig['tableName'] };
+    expect(() => validateConfigInvariants(cfg)).toThrow(EDBConfigInvariantViolationError);
+  });
+
+  it('throws when tableName is an empty string', () => {
+    const cfg: ResolvedConfig = { ...baseConfig, tableName: '' };
+    expect(() => validateConfigInvariants(cfg)).toThrow(EDBConfigInvariantViolationError);
+  });
+
+  it('throws when tableName is whitespace-only', () => {
+    const cfg: ResolvedConfig = { ...baseConfig, tableName: '   ' };
+    expect(() => validateConfigInvariants(cfg)).toThrow(EDBConfigInvariantViolationError);
+  });
+
+  it('does NOT throw when tableName is a function (thunk is opaque at validate time)', () => {
+    const cfg: ResolvedConfig = { ...baseConfig, tableName: () => 'resolved_at_runtime' };
+    expect(() => validateConfigInvariants(cfg)).not.toThrow();
+  });
+
+  it('does NOT throw when tableName is a non-empty string', () => {
+    const cfg: ResolvedConfig = { ...baseConfig, tableName: 'app_table' };
+    expect(() => validateConfigInvariants(cfg)).not.toThrow();
+  });
+
+  it('error.details.field === "tableName" when tableName is missing', () => {
+    const cfg: ResolvedConfig = { ...baseConfig, tableName: undefined as unknown as ResolvedConfig['tableName'] };
+    try {
+      validateConfigInvariants(cfg);
+      throw new Error('expected to throw');
+    } catch (e) {
+      const err = e as EDBConfigInvariantViolationError;
+      expect((err.details as { field: string }).field).toBe('tableName');
+    }
+  });
+});
+
+describe('validateConfigInvariants — remote (entries #3 / #5)', () => {
+  it('does NOT throw when remote is undefined', () => {
+    const cfg: ResolvedConfig = { ...baseConfig, remote: undefined };
+    expect(() => validateConfigInvariants(cfg)).not.toThrow();
+  });
+
+  it('does NOT throw when remote has both url and apiKey populated', () => {
+    const cfg: ResolvedConfig = {
+      ...baseConfig,
+      remote: { url: 'https://example.com', apiKey: 'secret' },
+    };
+    expect(() => validateConfigInvariants(cfg)).not.toThrow();
+  });
+
+  it('throws when remote is defined but url is missing', () => {
+    const cfg: ResolvedConfig = {
+      ...baseConfig,
+      remote: { apiKey: 'k' } as unknown as ResolvedConfig['remote'],
+    };
+    expect(() => validateConfigInvariants(cfg)).toThrow(EDBConfigInvariantViolationError);
+  });
+
+  it('throws when remote is defined but apiKey is missing', () => {
+    const cfg: ResolvedConfig = {
+      ...baseConfig,
+      remote: { url: 'u' } as unknown as ResolvedConfig['remote'],
+    };
+    expect(() => validateConfigInvariants(cfg)).toThrow(EDBConfigInvariantViolationError);
+  });
+
+  it('throws when remote.url is whitespace-only', () => {
+    const cfg: ResolvedConfig = {
+      ...baseConfig,
+      remote: { url: '   ', apiKey: 'k' },
+    };
+    expect(() => validateConfigInvariants(cfg)).toThrow(EDBConfigInvariantViolationError);
+  });
+
+  it('error names both missing fields when both are absent', () => {
+    const cfg: ResolvedConfig = {
+      ...baseConfig,
+      remote: {} as unknown as ResolvedConfig['remote'],
+    };
+    try {
+      validateConfigInvariants(cfg);
+      throw new Error('expected to throw');
+    } catch (e) {
+      const err = e as EDBConfigInvariantViolationError;
+      expect((err.details as { missing: string[] }).missing).toEqual(['remote.url', 'remote.apiKey']);
+    }
+  });
+});

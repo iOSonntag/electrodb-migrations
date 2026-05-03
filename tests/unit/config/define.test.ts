@@ -69,4 +69,21 @@ describe('defineConfig', () => {
     });
     expect(cfg.migrationStartVersions?.User?.version).toBe(5);
   });
+
+  it('accepts an empty config object (every field optional after entries #2/#4/#5)', () => {
+    const input: MigrationsConfig = {};
+    expect(defineConfig(input)).toBe(input);
+  });
+
+  it('accepts a partial remote with only url (entry #5)', () => {
+    const cfg = defineConfig({ remote: { url: 'https://example.com' } });
+    expect(cfg.remote?.url).toBe('https://example.com');
+    expect(cfg.remote?.apiKey).toBeUndefined();
+  });
+
+  it('accepts a partial remote with only apiKey (entry #5)', () => {
+    const cfg = defineConfig({ remote: { apiKey: 'secret' } });
+    expect(cfg.remote?.apiKey).toBe('secret');
+    expect(cfg.remote?.url).toBeUndefined();
+  });
 });

@@ -1,6 +1,18 @@
 import type { ResolvedConfig } from './types.js';
 
 /**
+ * Default `entities` path scaffolded by `init` and supplied by `resolveConfig`
+ * when the user omits the field. Matches README §5.1.1.
+ */
+export const DEFAULT_ENTITIES_PATH = 'src/database/entities' as const;
+
+/**
+ * Default `migrations` path scaffolded by `init` and supplied by `resolveConfig`
+ * when the user omits the field. Matches README §5.1.1.
+ */
+export const DEFAULT_MIGRATIONS_PATH = 'src/database/migrations' as const;
+
+/**
  * Lock-state-machine tuning defaults. README §5.1.3.
  *
  * - `heartbeatMs`: how often the lock holder writes a heartbeat. 30s is the

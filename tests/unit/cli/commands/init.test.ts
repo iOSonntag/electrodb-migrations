@@ -26,7 +26,7 @@ describe('runInit (INI-01 + INI-02)', () => {
     expect(existsSync(join(dir, 'electrodb-migrations.config.ts'))).toBe(true);
     const config = readFileSync(join(dir, 'electrodb-migrations.config.ts'), 'utf8');
     expect(config).toContain("import { defineConfig } from 'electrodb-migrations'");
-    expect(config).toContain("entities: 'src/entities'");
+    expect(config).toContain("entities: 'src/database/entities'");
     expect(config).toContain("migrations: 'src/database/migrations'");
     expect(config).toContain('tableName:');
   });
@@ -34,8 +34,8 @@ describe('runInit (INI-01 + INI-02)', () => {
   it('does NOT create a starter entity file (Q6 locked — keep init pure)', async () => {
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     await runInit({ cwd: dir, force: false });
-    // src/entities should NOT exist or, if it exists, must be empty.
-    const entitiesDir = join(dir, 'src/entities');
+    // src/database/entities should NOT exist or, if it exists, must be empty.
+    const entitiesDir = join(dir, 'src/database/entities');
     if (existsSync(entitiesDir)) {
       const fs = await import('node:fs');
       const items = fs.readdirSync(entitiesDir);
