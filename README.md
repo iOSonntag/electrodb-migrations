@@ -121,7 +121,38 @@ export default defineMigration({
 
 `up` is required; `down` is optional but required for post-finalize rollback. To read related entities inside the transform, see [Docs → Cross-entity reads](#66-cross-entity-reads).
 
-### 6. Wrap your DynamoDB client with the migration guard
+### 6. Apply
+
+```sh
+npx electrodb-migrations apply
+```
+
+Acquires the migration lock, scans v1 records, runs `up()` against each, and writes v2 records alongside. Both versions coexist on disk; ElectroDB's identity stamps route v1 reads to v1 records and v2 to v2. On success, the lock transitions to **release mode** — still gating app traffic, no longer gating the migration runner. Multiple pending migrations apply back-to-back in a single invocation. Full state machine in [§1 Locks](#1-locks-migration-release-and-maintenance-modes).
+
+### 7. Deploy your code, then release
+
+Deploy the version of your app that uses the new entity shape. Once it's live and healthy:
+
+```sh
+npx electrodb-migrations release
+```
+
+The release lock clears. Traffic flows.
+
+### 8. Finalize
+
+After a bake window where nothing is broken:
+
+```sh
+npx electrodb-migrations finalize 20260501083000-User-add-status
+# OR
+npx electrodb-migrations finalize --all
+```
+
+Deletes the v1 records and marks the migration `finalized`. Permanent. Acquires the lock in **maintenance mode** — concurrent runners blocked, but app traffic unaffected (the table is in a v2-only steady state). You can defer finalize for weeks; it's an optimization, not a requirement.
+
+
+### 9. Wrap your DynamoDB client with the migration guard
 
 A migration **has** downtime: app traffic must not hit the table while the lock is held. The guard wrapper rejects every guarded call with `EDBMigrationInProgressError` for the duration.
 
@@ -136,40 +167,13 @@ const guarded = migrate.guardedClient();
 const User = new Entity(userSchema, { client: guarded, table });
 ```
 
+Because migrations start operating after a configurable delay, the result is cached for minimal per-call overhead.
+
 Surface the error as HTTP 503 with `Retry-After` so clients back off automatically — see [§9.3](#93-edbmigrationinprogresserror) for the recommended handler pattern.
 
 > **⚠ Deploy the guard before your first `apply`.**  
 > *Without it, app traffic hits the table mid-migration and may silently corrupt data.*
 
-### 7. Apply
-
-```sh
-npx electrodb-migrations apply
-```
-
-Acquires the migration lock, scans v1 records, runs `up()` against each, and writes v2 records alongside. Both versions coexist on disk; ElectroDB's identity stamps route v1 reads to v1 records and v2 to v2. On success, the lock transitions to **release mode** — still gating app traffic, no longer gating the migration runner. Multiple pending migrations apply back-to-back in a single invocation. Full state machine in [§1 Locks](#1-locks-migration-release-and-maintenance-modes).
-
-### 8. Deploy your code, then release
-
-Deploy the version of your app that uses the new entity shape. Once it's live and healthy:
-
-```sh
-npx electrodb-migrations release
-```
-
-The release lock clears. Traffic flows.
-
-### 9. Finalize
-
-After a bake window where nothing is broken:
-
-```sh
-npx electrodb-migrations finalize 20260501083000-User-add-status
-# OR
-npx electrodb-migrations finalize --all
-```
-
-Deletes the v1 records and marks the migration `finalized`. Permanent. Acquires the lock in **maintenance mode** — concurrent runners blocked, but app traffic unaffected (the table is in a v2-only steady state). You can defer finalize for weeks; it's an optimization, not a requirement.
 
 ---
 
