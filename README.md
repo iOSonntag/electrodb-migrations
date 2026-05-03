@@ -33,7 +33,7 @@ You keep a single source-of-truth entity file (e.g. `src/database/entities/user.
 
 ## Quick start
 
-> *Quick start covers the production-safe baseline. For CI gating, multi-developer teams, large datasets, testing, and cross-entity reads, read [Recommended](#recommended) before going to production.*
+> *Quick start covers the production-safe baseline. For CI gating, large datasets, multi-developer teams, rollbacks, testing, cross-entity reads, and entity removal, read [Recommended](#recommended) before going to production.*
 
 ### 1. Initialize
 
@@ -119,7 +119,7 @@ export default defineMigration({
 });
 ```
 
-`up` is required; `down` is optional but required for post-finalize rollback. To read related entities inside the transform, see [Recommended → Reading from other entities](#5-reading-from-other-entities-during-a-migration).
+`up` is required; `down` is optional but required for post-finalize rollback. To read related entities inside the transform, see [Docs → Cross-entity reads](#66-cross-entity-reads).
 
 ### 6. Wrap your DynamoDB client with the migration guard
 
@@ -175,7 +175,7 @@ Deletes the v1 records and marks the migration `finalized`. Permanent. Acquires 
 
 ## Recommended
 
-Quick start covers the production-safe baseline. The practices in this section harden it further: gating bad merges in CI, scaling for large datasets, working in a multi-developer team, testing migrations before they touch production data, and handling the rarer cases of cross-entity reads and entity removal.
+Quick start covers the production-safe baseline. The blurbs below are a brief tour of the practices that harden it further; details for each live in [Docs](#docs).
 
 ### 1. Block bad merges in CI
 
@@ -185,193 +185,55 @@ Run this in your CI pipeline as a pre-merge or pre-deploy gate:
 npx electrodb-migrations validate
 ```
 
-Among other things it exits non-zero if any entity has drift without a scaffolded migration. Catches "developer edited an entity but didn't run `create`" before that change ever reaches a production table.
-
-It checks:
-- Whether there is any drift between the current entity and the last snapshot.
-- Whether there is a migration scaffolded for that drift.
-- Whether the entity version is in sync with the migrations version.
-- Whether the migrations start at version 1 and increment by 1 for each migration (no resets or skips).
-    - If you deleted older migrations that are no longer needed, you have to specify the starting version in the config per entity, e.g. `User: 5` if your latest migration for User is v5. More on that in the [docs](#docs).
-- Whether two migrations claim the same `from` version of an entity (parallel-branch collision — see [Multi-developer workflow](#3-multi-developer-workflow)).
-- Whether any migration's declared `reads` target has a later-sequenced pending migration (cross-entity ordering — see [Reading from other entities](#5-reading-from-other-entities-during-a-migration)).
-- Whether any entity that previously existed has been removed from `src/database/entities/`. The framework does not ship destructive migrations in v0.1; if the removal is intentional, see [Retiring entities](#6-retiring-entities).
+CI pre-merge gate that blocks drift, version skew, parallel-branch collisions, cross-entity ordering violations, and removed entities. See [Docs → §4.12 validate](#412-validate).
 
 ### 2. Performance - running migration on AWS
-Per quickstart the framework runs locally (e.g. CI). But the framework is designed to run migrations on AWS. This is especially useful for large datasets that would take a long time to migrate locally.
 
-The easiest way to run migrations is via AWS Lambda, but it has its limitations (max 15 minutes execution time, cold starts, etc.). For long-running migrations, it is recommended to run them on an EC2 instance or a container service like ECS or EKS.
-
-#### 2.1 AWS Lambda approach
-
-Create a migration handler function using the framework's helper:
+Running migrations on AWS reduces per-record network round-trips compared to running locally, which matters for large tables. For example, you can use the framework's built-in AWS Lambda helper:
 
 ```ts
 // src/migrationHandler.ts
 import { createLambdaMigrationHandler } from 'electrodb-migrations';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import migrations from './migrations/index.js';
-import { Resource } from 'sst';
 import config from '../electrodb-migrations.config.ts';
 
 export const handler = createLambdaMigrationHandler({
-  config,                                 // migrationStartVersions, lock.*, guard.* defaults — see §5.4
-  client: new DynamoDBClient({}),         // DynamoDB client instance
-  apiKey: process.env.MIGRATIONS_API_KEY, // set this env var to protect your migration endpoint
-  tableName: Resource.AppTable.name,      // resolved in the Lambda environment
-  migrations,                             // statically imported so the bundler picks it up
+  config,
+  client: new DynamoDBClient({}),
+  apiKey: process.env.MIGRATIONS_API_KEY,
+  tableName: process.env.TABLE_NAME!,
+  migrations,
 });
 ```
 
-Then in the `electrodb-migrations.config.ts` file, add the following configuration:
-
-```ts
-export default defineConfig({
-  // ... other config options
-  remote: {
-    url: process.env.MIGRATIONS_REMOTE_URL, // set this env var to your lambda endpoint
-    apiKey: process.env.MIGRATIONS_API_KEY, // set this env var to protect your migration endpoint
-  },
-});
-```
-
-If you now run `npx electrodb-migrations apply --remote`, the framework will send the migration commands to your Lambda function, which will execute them in the cloud.
-
-**How the CLI orchestrates the run.** `apply` / `finalize --all` resolve the pending list **locally** (the CLI has the migration files and queries the table for current `_migrations` state), then loop through that list and POST one Lambda invocation per migration. Each invocation runs exactly one migration end-to-end — for `apply`: acquire migration-mode lock → transform → transition to release-mode → return; for `finalize`: acquire maintenance-mode lock → delete v1 records → clear lock → return — and the CLI polls its `runId` until terminal before issuing the next one. "Apply all" / "finalize all" is never one Lambda call.
-
-**Important Notes:**
-
-- One function invocation per migration in sequence — so each single migration has the full 15-minute Lambda budget. For most use cases this is sufficient, but do your own due diligence on the expected runtime of any one migration.
-- Make sure your table has sufficient read/write capacity to handle the migration workload, especially if you have a large dataset. Consider using on-demand capacity or temporarily increasing provisioned capacity during the migration.
-- All CLI commands that interact with the database (apply, release, finalize, rollback) can be run with the `--remote` flag to execute them on AWS instead of locally. This way your CLI does not need direct access to the database and can leverage the cloud for execution.
-
-#### 2.2 Long-running server approach
-For long-running migrations that exceed Lambda's limits, you can run the framework inside a long-running Node process on an EC2 instance or a container in ECS/EKS. The framework does not provide a server implementation, but you can easily build one using the migrations client. See [detailed docs](#3-running-on-a-long-running-migration-server) for more information.
-
-### 3. Multi-developer workflow
-
-`.electrodb-migrations/` is committed (per [step 1](#1-initialize)). That gives CI the history it needs to detect drift, but it also means parallel branches that both scaffold a migration on the same entity will collide.
-
-**The collision.** Branches A and B are open at the same time, and both scaffold a User migration:
-
-- Branch A: `20260501-User-add-status` — claims User v1 → v2.
-- Branch B: `20260502-User-add-tier` — also claims User v1 → v2.
-
-Each migration folder ships a frozen `v1.ts` (the pre-migration shape) and `v2.ts` (the target shape). When A merges to main, the snapshot in `.electrodb-migrations/` advances to A's User v2. Branch B is now broken in three ways simultaneously:
-
-- B's migration folder claims to start from User v1, but main's User is at v2.
-- B's `v1.ts` no longer matches the new "previous" shape (which is A's v2).
-- B's `up()` was written assuming the v1 input shape.
-
-CI's [`validate` gate](#1-block-bad-merges-in-ci) catches this before merge — but you still have to fix B before it can land.
-
-**The fix.**
-
-1. Rebase the later branch on main.
-2. Re-frame the migration to the new starting point:
-   ```sh
-   npx electrodb-migrations create --regenerate 20260502-User-add-tier
-   ```
-   The framework keeps your `up()` and `down()` code, rewrites `v1.ts` and `v2.ts` to match the new "previous" shape and the current entity, and prints the new diff.
-3. Review the diff and update `up()` if the underlying transform changed (often it didn't — you're just reapplying the same incremental change on top of the new baseline).
-4. Commit and push. B now claims User v2 → v3 with internally consistent frozen schemas.
-
-> **Note:**  
-> *The same workflow applies to slow-merging PRs and long-lived branches: any time main moves on after you've scaffolded, run `--regenerate` before requesting another review.*
-
-### 4. Test your migrations
-
-A migration's `up()` is the only chance you get to transform every existing record correctly. Validate it before you ever run `apply` against production.
-
-The framework ships a unit-test harness at `electrodb-migrations/testing`:
-
-```ts
-import { testMigration } from 'electrodb-migrations/testing';
-import migration from './migration.js';
-
-testMigration(migration, [
-  { input: { id: '1', email: 'a@b' }, expectedV2: { id: '1', email: 'a@b', status: 'active' } },
-  { roundTrip: { id: '1', email: 'a@b' } }, // exercises `down` and steers you toward writing one
-]);
-```
-
-Output of `up()` is validated against v2's ElectroDB schema automatically, so a mismatched-shape transform fails the test even if you forgot to assert the offending field. Round-trip cases additionally exercise `down`, which is the cheapest way to make sure post-finalize rollbacks are actually possible.
-
-See [Docs → Testing migrations](#8-testing-migrations) for the full case-shape catalog and the rollback-resolver harness.
-
-### 5. Reading from other entities during a migration
-
-`up()` and `down()` receive a second `ctx` argument. Use `ctx.entity(Other)` to read related records — bound to the migration runner's unguarded client so it works while the lock is held. Reads only: writes through `ctx` throw, and reading the entity currently being migrated (`ctx.entity(User)` from inside a User migration) also throws — its on-disk state is mid-flight and reads would be order-dependent. **Don't reach for this lightly.**
-
-> **⚠ Discouraged by default — every read multiplies your migration runtime.**  
-> *Reads inside `up()`/`down()` fire once per record, serially against your migration's throughput budget. Over a million-row table, one extra read per row is a million extra `GetItem` calls before the migration can finish — and the lock stays held the whole time. Almost always faster: denormalize differently, or pre-load the lookup table into memory in your runner before invoking `apply`.*
-
-#### 5.1 Cross-entity ordering rule
-
-When migration `M` reads entity `Y` via `ctx.entity(Y)`, the on-disk shape of `Y` must match the source `Y` you imported. That holds iff every pending migration on `Y` is sequenced *before* `M`. If `Y` has any migration sequenced after `M`, on-disk `Y` is still at an older shape and the read would silently mis-deserialize.
-
-#### 5.2 Declare what you read
-
-Add a `reads` field to `defineMigration` listing every entity the transform touches via `ctx.entity()`:
-
-```ts
-import { Team } from '../../entities/team.js';
-
-defineMigration({
-  entityName: 'User',
-  from: UserV1,
-  to: UserV2,
-  reads: [Team],
-  up: async (user, ctx) => {
-    const team = await ctx.entity(Team).get({ id: user.teamId }).go();
-    return { ...user, teamName: team.data.name };
-  },
-});
-```
-
-The framework uses `reads` for two things:
-
-- **CI gate.** [`validate`](#1-block-bad-merges-in-ci) refuses any branch where a declared `reads` target has a later-sequenced pending migration. The error names both migrations and points at the fix.
-- **Rollback ordering.** Rolling back `M` is refused if any migration on a `reads` target has been applied since `M`; those must be rolled back first. The head rule already enforces this within a single entity; `reads` extends it across entities.
-
-#### 5.3 Runtime guard (the safety net)
-
-Even without `reads` declared, `ctx.entity(Y)` checks at call time that on-disk `Y` matches the imported source. On mismatch it throws `EDBStaleEntityReadError` *before* hitting DynamoDB, naming the conflicting migration. The same call also throws `EDBSelfReadInMigrationError` if you try to read the entity currently being migrated.
-
-The runtime guard catches forgotten declarations; the `reads` declaration catches the same problem at PR review time, before a production apply. Use both.
-
-#### 5.4 Resolving a conflict
-
-When `validate` flags a cross-entity ordering conflict, you have three options:
-
-1. **Re-timestamp** so the read target's migration runs first.
-2. **Combine** both changes into a single migration if they're tightly coupled.
-3. **Stop denormalizing** across that boundary — compute the value a different way that doesn't require the cross-entity read.
-
-### 6. Retiring entities
-
-The framework intentionally does **not** ship "delete this entity's data" migrations in v0.1. Every other migration kind preserves a recovery path — `down()` reconstructs v1, or pre-finalize rollback restores from v1 records still on disk. A destructive migration cannot offer that: once finalized, the data is gone and only an out-of-band DynamoDB backup can bring it back. Until v0.2 designs that flow with explicit guards, data deletion is treated as the operator's responsibility.
-
-#### 6.1 What happens when you remove an entity
-
-Removing an entity file from `src/database/entities/` triggers a distinct drift kind: **`entity-removed`**. [`validate`](#1-block-bad-merges-in-ci) reports it explicitly rather than passing silently or scaffolding a destructive migration. CI fails until you decide what to do with the data.
-
-#### 6.2 Acknowledging the removal
-
-If the entity is being retired and you've handled the data separately (one-off cleanup script, TTL-based expiry, or you're keeping the records in place for now), tell the framework to advance the snapshot:
+Then run any database-touching command with `--remote`:
 
 ```sh
-npx electrodb-migrations acknowledge-removal User
+npx electrodb-migrations apply --remote
 ```
 
-This updates the framework's internal snapshot to record that User is intentionally gone. It does **not** touch any data on disk. After running it, `validate` passes.
+Other paths (e.g. running the framework inside a long-running container in ECS/EKS) are also supported — see [Docs → §3 Running on a long-running migration server](#3-running-on-a-long-running-migration-server) and [Docs → §4 CLI](#4-cli) for the configuration, the `--remote` semantics, and the operational notes.
 
-> **What this command will not do for you.**  
-> *It will not delete records, will not check whether records still exist, and will not coordinate the removal with the migration lock. If you want existing rows gone, write and run that cleanup yourself before or after acknowledging.*
+### 3. Rollbacks
 
-#### 6.3 What v0.2 will offer
+The framework supports rolling back applied migrations both before and after `finalize`, with three named strategies (`projected`, `snapshot`, `fill-only`) and a custom-resolver escape hatch. Each has different data-loss and reconstruction trade-offs depending on whether the lock is still held, has been released, or the migration has been finalized — read [Docs → §2 Rollback](#2-rollback) before relying on rollback in production.
 
-A first-class entity-deletion migration with the same lock, audit, and pre-finalize rollback guarantees as transform migrations — plus an optional archive hook for the common "copy to a separate entity before deleting" pattern. See [Future plans → Entity deletion migrations](#144-entity-deletion-migrations).
+### 4. Multi-developer workflow
+
+`.electrodb-migrations/` is committed, so parallel branches that both scaffold a migration on the same entity will collide on the frozen snapshots once the first branch merges. The fix is a rebase plus `npx electrodb-migrations create --regenerate <migration-id>`. See [Docs → §11 Multi-developer workflow](#11-multi-developer-workflow) for the collision narrative, the full fix flow, and the long-lived-branch follow-up.
+
+### 5. Test your migrations
+
+The framework ships a unit-test harness so you can validate `up()` (and optionally `down()`) before running `apply` against production data — see [Docs → §8 Testing migrations](#8-testing-migrations).
+
+### 6. Reading from other entities during a migration
+
+`up()` and `down()` receive a `ctx` argument; `ctx.entity(Other)` reads related records under the migration runner's unguarded client. Reach for it sparingly — every read fires once per record and multiplies migration runtime, the lock stays held the whole time, and there are subtle ordering rules between the migration being run and pending migrations on the read target. See [Docs → §6.6 Cross-entity reads](#66-cross-entity-reads) for the ordering rule, the `reads` declaration, the runtime guard, and the three-option conflict-resolution flow.
+
+### 7. Retiring entities
+
+Removing an entity from `entities/` triggers a distinct drift kind (`entity-removed`) that the [`validate`](#412-validate) gate refuses to pass silently — the framework does not ship destructive migrations in v0.1, so the operator must acknowledge the removal explicitly with `npx electrodb-migrations acknowledge-removal <EntityName>`. See [Docs → §4.13 acknowledge-removal](#413-acknowledge-removal) for what the command does (and explicitly does not) do to records on disk.
 
 ---
 
@@ -897,6 +759,55 @@ export const handler = createLambdaMigrationHandler({
 
 #### 6.5 reads
 
+#### 6.6 Cross-entity reads
+
+`up()` and `down()` receive a second `ctx` argument. Use `ctx.entity(Other)` to read related records — bound to the migration runner's unguarded client so it works while the lock is held. Reads only: writes through `ctx` throw, and reading the entity currently being migrated (`ctx.entity(User)` from inside a User migration) also throws — its on-disk state is mid-flight and reads would be order-dependent. **Don't reach for this lightly.**
+
+> **⚠ Discouraged by default — every read multiplies your migration runtime.**  
+> *Reads inside `up()`/`down()` fire once per record, serially against your migration's throughput budget. Over a million-row table, one extra read per row is a million extra `GetItem` calls before the migration can finish — and the lock stays held the whole time. Almost always faster: denormalize differently, or pre-load the lookup table into memory in your runner before invoking `apply`.*
+
+##### 6.6.1 Cross-entity ordering rule
+
+When migration `M` reads entity `Y` via `ctx.entity(Y)`, the on-disk shape of `Y` must match the source `Y` you imported. That holds iff every pending migration on `Y` is sequenced *before* `M`. If `Y` has any migration sequenced after `M`, on-disk `Y` is still at an older shape and the read would silently mis-deserialize.
+
+##### 6.6.2 Declare what you read
+
+Add a `reads` field to `defineMigration` listing every entity the transform touches via `ctx.entity()`:
+
+```ts
+import { Team } from '../../entities/team.js';
+
+defineMigration({
+  entityName: 'User',
+  from: UserV1,
+  to: UserV2,
+  reads: [Team],
+  up: async (user, ctx) => {
+    const team = await ctx.entity(Team).get({ id: user.teamId }).go();
+    return { ...user, teamName: team.data.name };
+  },
+});
+```
+
+The framework uses `reads` for two things:
+
+- **CI gate.** [`validate`](#412-validate) refuses any branch where a declared `reads` target has a later-sequenced pending migration. The error names both migrations and points at the fix.
+- **Rollback ordering.** Rolling back `M` is refused if any migration on a `reads` target has been applied since `M`; those must be rolled back first. The head rule already enforces this within a single entity; `reads` extends it across entities.
+
+##### 6.6.3 Runtime guard (the safety net)
+
+Even without `reads` declared, `ctx.entity(Y)` checks at call time that on-disk `Y` matches the imported source. On mismatch it throws `EDBStaleEntityReadError` *before* hitting DynamoDB, naming the conflicting migration. The same call also throws `EDBSelfReadInMigrationError` if you try to read the entity currently being migrated.
+
+The runtime guard catches forgotten declarations; the `reads` declaration catches the same problem at PR review time, before a production apply. Use both.
+
+##### 6.6.4 Resolving a conflict
+
+When `validate` flags a cross-entity ordering conflict, you have three options:
+
+1. **Re-timestamp** so the read target's migration runs first.
+2. **Combine** both changes into a single migration if they're tightly coupled.
+3. **Stop denormalizing** across that boundary — compute the value a different way that doesn't require the cross-entity read.
+
 ### 7. Programmatic API
 
 #### 7.1 createMigrationsClient
@@ -1063,48 +974,79 @@ The transform you write decides whether each record needs rewriting; `--force` o
 
 #### 10.5 Forcing a migration when no drift is detected
 
-### 11. Lock and runtime internals
+### 11. Multi-developer workflow
 
-#### 11.1 The _migration_lock entity
+`.electrodb-migrations/` is committed (per [step 1](#1-initialize)). That gives CI the history it needs to detect drift, but it also means parallel branches that both scaffold a migration on the same entity will collide.
 
-#### 11.2 The _migrations entity (state log)
+**The collision.** Branches A and B are open at the same time, and both scaffold a User migration:
 
-#### 11.3 Heartbeat and stale takeover
+- Branch A: `20260501-User-add-status` — claims User v1 → v2.
+- Branch B: `20260502-User-add-tier` — also claims User v1 → v2.
 
-#### 11.4 The acquire algorithm (conditional-write + verify)
+Each migration folder ships a frozen `v1.ts` (the pre-migration shape) and `v2.ts` (the target shape). When A merges to main, the snapshot in `.electrodb-migrations/` advances to A's User v2. Branch B is now broken in three ways simultaneously:
 
-#### 11.5 Pre-migration wait window
+- B's migration folder claims to start from User v1, but main's User is at v2.
+- B's `v1.ts` no longer matches the new "previous" shape (which is A's v2).
+- B's `up()` was written assuming the v1 input shape.
 
-#### 11.6 runId tracking
+CI's [`validate` gate](#412-validate) catches this before merge — but you still have to fix B before it can land.
 
-### 12. Migration state machine
+**The fix.**
 
-#### 12.1 States (pending / applied / finalized / failed / reverted)
+1. Rebase the later branch on main.
+2. Re-frame the migration to the new starting point:
+   ```sh
+   npx electrodb-migrations create --regenerate 20260502-User-add-tier
+   ```
+   The framework keeps your `up()` and `down()` code, rewrites `v1.ts` and `v2.ts` to match the new "previous" shape and the current entity, and prints the new diff.
+3. Review the diff and update `up()` if the underlying transform changed (often it didn't — you're just reapplying the same incremental change on top of the new baseline).
+4. Commit and push. B now claims User v2 → v3 with internally consistent frozen schemas.
 
-#### 12.2 Transitions
+> **Note:**  
+> *The same workflow applies to slow-merging PRs and long-lived branches: any time main moves on after you've scaffolded, run `--regenerate` before requesting another review.*
 
-#### 12.3 Failed migrations and required rollbacks
+### 12. Lock and runtime internals
 
-#### 12.4 Reverted is terminal
+#### 12.1 The _migration_lock entity
 
-### 13. Multi-entity tables
+#### 12.2 The _migrations entity (state log)
 
-#### 13.1 Single-table design implications
+#### 12.3 Heartbeat and stale takeover
 
-#### 13.2 Why locks are table-wide today
+#### 12.4 The acquire algorithm (conditional-write + verify)
 
-#### 13.3 Per-entity migration ordering
+#### 12.5 Pre-migration wait window
 
-### 14. Future plans
+#### 12.6 runId tracking
 
-#### 14.1 Per-entity lock scoping
+### 13. Migration state machine
 
-#### 14.2 Zero-downtime apply
+#### 13.1 States (pending / applied / finalized / failed / reverted)
 
-#### 14.3 Additional remote transports
+#### 13.2 Transitions
 
-#### 14.4 Entity deletion migrations
+#### 13.3 Failed migrations and required rollbacks
 
-#### 14.5 Other ideas
+#### 13.4 Reverted is terminal
+
+### 14. Multi-entity tables
+
+#### 14.1 Single-table design implications
+
+#### 14.2 Why locks are table-wide today
+
+#### 14.3 Per-entity migration ordering
+
+### 15. Future plans
+
+#### 15.1 Per-entity lock scoping
+
+#### 15.2 Zero-downtime apply
+
+#### 15.3 Additional remote transports
+
+#### 15.4 Entity deletion migrations
+
+#### 15.5 Other ideas
 
 ---
