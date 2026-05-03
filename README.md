@@ -380,15 +380,15 @@ Invoked with `--strategy custom`. The framework refuses at start time if `rollba
 
 The v1 records are already gone, so every v2 record is effectively Type B. Only `projected` is sensible — `snapshot` has nothing to keep, `fill-only` has nothing to fall back to. The framework refuses both on a finalized migration.
 
-`down` is **required**; without it the framework throws `EDBRollbackNotPossibleError({ reason: 'no-down-fn' })`. `--strategy custom` is permitted if a `rollbackResolver` is defined; the resolver will only ever see `kind: 'B'` in this case.
+`down` is **required**; without it the framework throws `EDBRollbackNotPossibleError({ reason: 'NO_DOWN_FUNCTION' })`. `--strategy custom` is permitted if a `rollbackResolver` is defined; the resolver will only ever see `kind: 'B'` in this case.
 
 #### 2.4 Refusal cases
 
 - A newer applied migration exists for the same entity → `EDBRollbackOutOfOrderError`.
 - The migration is `pending` or already `reverted` → friendly no-op message.
-- `--strategy projected` or `fill-only` without `down` defined → `EDBRollbackNotPossibleError({ reason: 'no-down-fn' })`.
-- `--strategy custom` without `rollbackResolver` defined → `EDBRollbackNotPossibleError({ reason: 'no-resolver' })`.
-- `--strategy snapshot` or `fill-only` on a finalized migration → `EDBRollbackNotPossibleError({ reason: 'finalized-only-projected' })`.
+- `--strategy projected` or `fill-only` without `down` defined → `EDBRollbackNotPossibleError({ reason: 'NO_DOWN_FUNCTION' })`.
+- `--strategy custom` without `rollbackResolver` defined → `EDBRollbackNotPossibleError({ reason: 'NO_RESOLVER' })`.
+- `--strategy snapshot` or `fill-only` on a finalized migration → `EDBRollbackNotPossibleError({ reason: 'FINALIZED_ONLY_PROJECTED' })`.
 
 > **Note:**  
 > *If you have multiple unfinalized migrations stacked on top of each other, each one carries its own gap window from when it was released. The head rule keeps each rollback to one decision at a time — the framework does not cascade.*
@@ -650,8 +650,10 @@ Override the default attribute names if your table uses different ones (e.g. `PK
 |---|---|---|---|
 | `keyNames.partitionKey` | `string` | `'pk'` | Partition-key attribute name on your table. |
 | `keyNames.sortKey` | `string` | `'sk'` | Sort-key attribute name on your table. |
-| `keyNames.electroEntity` | `string` | `'__edb_e__'` | ElectroDB entity-name marker field. Override if your table renames it. |
-| `keyNames.electroVersion` | `string` | `'__edb_v__'` | ElectroDB entity-version marker field. Override if your table renames it. |
+| `keyNames.electroEntity` | `string` | ElectroDB default (currently `__edb_e__`) | ElectroDB entity-name marker field. Override only if you've already renamed it on your own entities. |
+| `keyNames.electroVersion` | `string` | ElectroDB default (currently `__edb_v__`) | ElectroDB entity-version marker field. Override only if you've already renamed it on your own entities. |
+
+When you don't override these, the framework forwards no `identifiers` option to ElectroDB; ElectroDB uses its own defaults (currently `__edb_e__` and `__edb_v__`). The framework intentionally does not freeze those values — if a future ElectroDB version changes them, this library follows automatically.
 
 ##### 5.1.3 `lock`
 
@@ -683,6 +685,8 @@ Remote-runner endpoint used by every CLI command's `--remote` flag.
 |---|---|---|---|
 | `remote.url` | `string` | — | Endpoint receiving `--remote` POSTs (Lambda URL, ALB, etc.). |
 | `remote.apiKey` | `string` | — | Sent as `X-Api-Key` to gate the remote handler. |
+
+Both fields are individually optional on the config file (either can come from a CLI flag or a runtime arg), but when `remote` is set the framework throws `EDBConfigInvariantViolationError` at start-time if either field fails to reach the resolved config from some layer. Either supply both `url` and `apiKey`, or omit `remote` entirely.
 
 ##### 5.1.6 `migrationStartVersions`
 
