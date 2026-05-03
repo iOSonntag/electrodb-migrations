@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  type Drift,
-  classifyDrift,
-} from '../../../src/drift/classify.js';
-import type {
-  EntityProjection,
-  ProjectedAttribute,
-  ProjectedIndex,
-} from '../../../src/safety/fingerprint-projection.js';
+import { type Drift, classifyDrift } from '../../../src/drift/classify.js';
+import type { EntityProjection, ProjectedAttribute, ProjectedIndex } from '../../../src/safety/fingerprint-projection.js';
 
 /**
  * Builds a minimal `EntityProjection` shape for classifier tests.
@@ -77,9 +70,7 @@ describe('classifyDrift — null/empty cases (DRF-06 behavior-only no-op)', () =
 describe('classifyDrift — entity-removed', () => {
   it('emits entity-removed when curr is null and prev is non-null', () => {
     const p = makeProjection({ entity: 'User', service: 'app' });
-    expect(classifyDrift(p, null)).toEqual([
-      { kind: 'entity-removed', entity: 'User', service: 'app' },
-    ]);
+    expect(classifyDrift(p, null)).toEqual([{ kind: 'entity-removed', entity: 'User', service: 'app' }]);
   });
 });
 
@@ -101,7 +92,8 @@ describe('classifyDrift — greenfield baseline (null prev → projection curr)'
       { kind: 'attribute-added', name: 'alpha', type: 'string', required: false, warnNeedsDefault: false },
       { kind: 'attribute-added', name: 'zeta', type: 'string', required: true, warnNeedsDefault: true },
       { kind: 'index-added', name: 'primary', pkComposite: ['id'], skComposite: [] },
-      { kind: 'index-added', name: 'secondary', pkComposite: ['email'] },
+      // secondary is built via makeIndex(), which includes a default sk with empty composite
+      { kind: 'index-added', name: 'secondary', pkComposite: ['email'], skComposite: [] },
     ]);
   });
 });
@@ -115,9 +107,7 @@ describe('classifyDrift — attribute-added', () => {
         status: makeAttribute({ type: 'string', required: true, field: 'status' }),
       },
     });
-    expect(classifyDrift(prev, curr)).toEqual([
-      { kind: 'attribute-added', name: 'status', type: 'string', required: true, warnNeedsDefault: true },
-    ]);
+    expect(classifyDrift(prev, curr)).toEqual([{ kind: 'attribute-added', name: 'status', type: 'string', required: true, warnNeedsDefault: true }]);
   });
 
   it('non-required attribute → warnNeedsDefault=false', () => {
@@ -128,9 +118,7 @@ describe('classifyDrift — attribute-added', () => {
         nickname: makeAttribute({ type: 'string', required: false, field: 'nickname' }),
       },
     });
-    expect(classifyDrift(prev, curr)).toEqual([
-      { kind: 'attribute-added', name: 'nickname', type: 'string', required: false, warnNeedsDefault: false },
-    ]);
+    expect(classifyDrift(prev, curr)).toEqual([{ kind: 'attribute-added', name: 'nickname', type: 'string', required: false, warnNeedsDefault: false }]);
   });
 
   it('multiple added attributes are alphabetical', () => {
@@ -157,9 +145,7 @@ describe('classifyDrift — attribute-removed', () => {
       },
     });
     const curr = makeProjection();
-    expect(classifyDrift(prev, curr)).toEqual([
-      { kind: 'attribute-removed', name: 'deprecated', type: 'number' },
-    ]);
+    expect(classifyDrift(prev, curr)).toEqual([{ kind: 'attribute-removed', name: 'deprecated', type: 'number' }]);
   });
 });
 
@@ -199,7 +185,7 @@ describe('classifyDrift — attribute-changed', () => {
         email: makeAttribute({ field: 'email' }),
       },
     });
-    const result = classifyDrift(prev, curr) as ReadonlyArray<{
+    const result = classifyDrift(prev, curr) as unknown as ReadonlyArray<{
       kind: string;
       name: string;
       changes: Array<{ field: string; from: unknown; to: unknown }>;
@@ -236,9 +222,7 @@ describe('classifyDrift — attribute-changed', () => {
       {
         kind: 'attribute-changed',
         name: 'status',
-        changes: [
-          { field: 'enumArray', from: ['active', 'inactive'], to: ['inactive', 'active'] },
-        ],
+        changes: [{ field: 'enumArray', from: ['active', 'inactive'], to: ['inactive', 'active'] }],
       },
     ]);
   });
@@ -310,7 +294,7 @@ describe('classifyDrift — attribute-changed', () => {
         }),
       },
     });
-    const result = classifyDrift(prev, curr) as ReadonlyArray<{
+    const result = classifyDrift(prev, curr) as unknown as ReadonlyArray<{
       kind: string;
       name: string;
       changes: Array<{ field: string }>;
@@ -335,7 +319,7 @@ describe('classifyDrift — attribute-changed', () => {
         tags: makeAttribute({ type: 'list', field: 'tags', items: 'number' }),
       },
     });
-    const result = classifyDrift(prev, curr) as ReadonlyArray<{
+    const result = classifyDrift(prev, curr) as unknown as ReadonlyArray<{
       kind: string;
       changes: Array<{ field: string }>;
     }>;
@@ -374,9 +358,7 @@ describe('classifyDrift — index-added', () => {
         bare: { type: 'isolated', pk: { field: 'gsi2pk', composite: ['x'] } },
       },
     });
-    expect(classifyDrift(prev, curr)).toEqual([
-      { kind: 'index-added', name: 'bare', pkComposite: ['x'] },
-    ]);
+    expect(classifyDrift(prev, curr)).toEqual([{ kind: 'index-added', name: 'bare', pkComposite: ['x'] }]);
   });
 });
 
@@ -389,9 +371,7 @@ describe('classifyDrift — index-removed', () => {
       },
     });
     const curr = makeProjection();
-    expect(classifyDrift(prev, curr)).toEqual([
-      { kind: 'index-removed', name: 'deprecated' },
-    ]);
+    expect(classifyDrift(prev, curr)).toEqual([{ kind: 'index-removed', name: 'deprecated' }]);
   });
 });
 
@@ -429,7 +409,7 @@ describe('classifyDrift — index-changed', () => {
         }),
       },
     });
-    const result = classifyDrift(prev, curr) as ReadonlyArray<{
+    const result = classifyDrift(prev, curr) as unknown as ReadonlyArray<{
       kind: string;
       name: string;
       changes: Array<{ field: string }>;
@@ -648,18 +628,7 @@ describe('classifyDrift — output ordering (deterministic)', () => {
       if ('entity' in d) return d.entity;
       return '';
     });
-    expect(names).toEqual([
-      'aAdded',
-      'zAdded',
-      'aRemoved',
-      'zRemoved',
-      'cChanged',
-      'aAdded',
-      'zAdded',
-      'aRemoved',
-      'zRemoved',
-      'cChanged',
-    ]);
+    expect(names).toEqual(['aAdded', 'zAdded', 'aRemoved', 'zRemoved', 'cChanged', 'aAdded', 'zAdded', 'aRemoved', 'zRemoved', 'cChanged']);
   });
 
   it('determinism: two invocations on same input produce deeply-equal output', () => {
