@@ -64,6 +64,7 @@ describe('formatTimestamp', () => {
       expect(formatTimestamp(Date.UTC(2026, 4, 1, 8, 30, 0))).toBe('20260501083000');
     } finally {
       if (originalTz === undefined) {
+        // biome-ignore lint/performance/noDelete: setting `process.env.TZ = undefined` would coerce to the string "undefined" in Node.
         delete process.env.TZ;
       } else {
         process.env.TZ = originalTz;
@@ -181,6 +182,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   if (savedTz === undefined) {
+    // biome-ignore lint/performance/noDelete: setting `process.env.TZ = undefined` would coerce to the string "undefined" in Node.
     delete process.env.TZ;
   } else {
     process.env.TZ = savedTz;
