@@ -17,3 +17,10 @@ export { createMigrationId, formatTimestamp, sanitizeSlug } from './migration-id
 export type { CreateMigrationIdArgs } from './migration-id.js';
 export { renderMigrationTemplate } from './templates.js';
 export type { RenderMigrationTemplateArgs } from './templates.js';
+// scaffoldCreate orchestrator (Plan 07). The `EDBDriftNotDetectedError`
+// class is INTENTIONALLY not re-exported here — it's an internal error
+// per RESEARCH §A7 and listed in `FORBIDDEN_RUNTIME_KEYS` of the
+// public-surface gate test. It's reachable via the direct `./create.js`
+// import path inside the framework but not from `src/index.ts`.
+export { scaffoldCreate } from './create.js';
+export type { ScaffoldCreateArgs, ScaffoldCreateResult } from './create.js';

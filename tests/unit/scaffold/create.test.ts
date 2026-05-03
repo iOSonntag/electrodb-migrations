@@ -2,8 +2,8 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { computeIntegrityHash } from '../../../src/scaffold/integrity-hash.js';
 import { EDBDriftNotDetectedError, scaffoldCreate } from '../../../src/scaffold/create.js';
+import { computeIntegrityHash } from '../../../src/scaffold/integrity-hash.js';
 
 /**
  * Plan 02-07 Task 2 — `scaffoldCreate` 12-step transactional flow.
