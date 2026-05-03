@@ -1,13 +1,22 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { renderFrozenEntitySource } from '../../../src/scaffold/frozen-snapshot.js';
 import type { EntityProjection } from '../../../src/safety/fingerprint-projection.js';
+import { renderFrozenEntitySource } from '../../../src/scaffold/frozen-snapshot.js';
 
 let dir: string;
+/**
+ * For the jiti round-trip test we need the rendered file to be able to
+ * resolve `electrodb` via node_modules — that means the tmp directory
+ * must live inside (or under) the project root so Node walks up into
+ * the worktree's `node_modules/`. Tmpdir-based paths fail with
+ * "Cannot find package 'electrodb'" because they're outside the project.
+ */
+const PROJECT_TMP_ROOT = resolve(__dirname, '../../../.tmp-tests');
 
 beforeEach(() => {
+  // Default tmp dir for non-jiti tests (cheap, OS tmpdir).
   dir = mkdtempSync(join(tmpdir(), 'edbm-frozen-snapshot-test-'));
 });
 
@@ -55,7 +64,7 @@ describe('renderFrozenEntitySource — header preamble + import + export shape',
     expect(lines[2]).toBe('// Regenerate with `electrodb-migrations create --regenerate <id>` after rebases.');
   });
 
-  it('emits `import { Entity } from \'electrodb\';` exactly once at line 4', () => {
+  it("emits `import { Entity } from 'electrodb';` exactly once at line 4", () => {
     const out = renderFrozenEntitySource({ projection: projectionUserSimple(), version: '1' });
     const lines = out.split('\n');
     expect(lines[3]).toBe("import { Entity } from 'electrodb';");
@@ -128,9 +137,7 @@ describe('renderFrozenEntitySource — determinism', () => {
         },
       },
     };
-    expect(renderFrozenEntitySource({ projection: p1, version: '1' })).toBe(
-      renderFrozenEntitySource({ projection: p2, version: '1' }),
-    );
+    expect(renderFrozenEntitySource({ projection: p1, version: '1' })).toBe(renderFrozenEntitySource({ projection: p2, version: '1' }));
   });
 
   it('produces byte-identical output for two equivalent projections with reordered index keys', () => {
@@ -168,9 +175,7 @@ describe('renderFrozenEntitySource — determinism', () => {
         },
       },
     };
-    expect(renderFrozenEntitySource({ projection: p1, version: '1' })).toBe(
-      renderFrozenEntitySource({ projection: p2, version: '1' }),
-    );
+    expect(renderFrozenEntitySource({ projection: p1, version: '1' })).toBe(renderFrozenEntitySource({ projection: p2, version: '1' }));
   });
 
   it('places attributes in alphabetical order in the output even when input is reverse-sorted', () => {
@@ -298,17 +303,27 @@ describe('renderFrozenEntitySource — formatting', () => {
 
 describe('renderFrozenEntitySource — TypeScript syntactic validity', () => {
   it('output round-trips via jiti to a module whose named export has the right model fields', async () => {
-    const projection = projectionUserSimple();
-    const out = renderFrozenEntitySource({ projection, version: '1' });
-    const tmpFile = join(dir, 'v1.ts');
-    writeFileSync(tmpFile, out, 'utf8');
-    const { createJiti } = await import('jiti');
-    const jiti = createJiti(import.meta.url, { tryNative: true });
-    const mod = (await jiti.import(tmpFile)) as Record<string, { model: { entity: string; service: string; version: string } }>;
-    expect(mod.User).toBeDefined();
-    expect(mod.User.model.entity).toBe('User');
-    expect(mod.User.model.service).toBe('app');
-    expect(mod.User.model.version).toBe('1');
+    // Use a project-rooted tmp dir so the rendered file's `import 'electrodb'`
+    // resolves via the worktree's node_modules.
+    mkdirSync(PROJECT_TMP_ROOT, { recursive: true });
+    const localDir = mkdtempSync(join(PROJECT_TMP_ROOT, 'frozen-roundtrip-'));
+    try {
+      const projection = projectionUserSimple();
+      const out = renderFrozenEntitySource({ projection, version: '1' });
+      const tmpFile = join(localDir, 'v1.ts');
+      writeFileSync(tmpFile, out, 'utf8');
+      const { createJiti } = await import('jiti');
+      const jiti = createJiti(import.meta.url, { tryNative: true });
+      const mod = (await jiti.import(tmpFile)) as Record<string, { model: { entity: string; service: string; version: string } }>;
+      const userExport = mod.User;
+      expect(userExport).toBeDefined();
+      if (!userExport) throw new Error('expected User export');
+      expect(userExport.model.entity).toBe('User');
+      expect(userExport.model.service).toBe('app');
+      expect(userExport.model.version).toBe('1');
+    } finally {
+      rmSync(localDir, { recursive: true, force: true });
+    }
   });
 
   it('emits valid TypeScript syntax (parseable with the TypeScript compiler)', async () => {

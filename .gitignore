@@ -28,6 +28,7 @@ dist/
 # Test / coverage
 coverage/
 .nyc_output/
+.tmp-tests/
 
 # Claude
 .claude/
