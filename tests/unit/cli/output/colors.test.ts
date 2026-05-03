@@ -1,22 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { c, type Colorizer } from '../../../../src/cli/output/colors.js';
+import pc from 'picocolors';
+import { describe, expect, it } from 'vitest';
+import { type Colorizer, c } from '../../../../src/cli/output/colors.js';
 
-const ORIGINAL_FORCE_COLOR = process.env.FORCE_COLOR;
-
+/**
+ * picocolors decides isColorSupported once at module load (reads
+ * process.env.FORCE_COLOR / process.stdout.isTTY). We can't reliably toggle
+ * colors after import, so the assertions branch on `pc.isColorSupported`:
+ * - colors on  -> assert ANSI escape sequences are present
+ * - colors off -> assert outputs are pass-through plaintext
+ * Both states are valid CLI environments and both must round-trip the input.
+ */
 describe('colors.ts (CLI-08)', () => {
-  beforeEach(() => {
-    // Force ANSI on so output is deterministic across CI / local TTYs.
-    process.env.FORCE_COLOR = '1';
-  });
-
-  afterEach(() => {
-    if (ORIGINAL_FORCE_COLOR === undefined) {
-      delete process.env.FORCE_COLOR;
-    } else {
-      process.env.FORCE_COLOR = ORIGINAL_FORCE_COLOR;
-    }
-  });
-
   it('exports the five Colorizer methods (ok / warn / err / dim / bold)', () => {
     const required: Array<keyof Colorizer> = ['ok', 'warn', 'err', 'dim', 'bold'];
     for (const key of required) {
@@ -24,29 +18,40 @@ describe('colors.ts (CLI-08)', () => {
     }
   });
 
-  it('c.ok wraps its input with ANSI escape codes (green) when colors are on', () => {
+  it('c.ok always round-trips the input text and uses picocolors.green', () => {
     const out = c.ok('hello');
     expect(typeof out).toBe('string');
-    // FORCE_COLOR=1 should add ANSI sequences; total length grows beyond plain text.
-    expect(out.length).toBeGreaterThan('hello'.length);
     expect(out).toContain('hello');
-    // Green (32) is the canonical picocolors green code.
-    expect(out).toContain('[32m');
+    expect(out).toBe(pc.green('hello'));
+    if (pc.isColorSupported) {
+      // 32 is the canonical SGR code for green.
+      expect(out).toContain('[32m');
+    } else {
+      expect(out).toBe('hello');
+    }
   });
 
-  it('c.warn wraps its input with the yellow ANSI sequence', () => {
+  it('c.warn uses picocolors.yellow', () => {
     const out = c.warn('warning');
     expect(out).toContain('warning');
-    expect(out).toContain('[33m');
+    expect(out).toBe(pc.yellow('warning'));
+    if (pc.isColorSupported) {
+      expect(out).toContain('[33m');
+    }
   });
 
-  it('c.err wraps its input with the red ANSI sequence', () => {
+  it('c.err uses picocolors.red', () => {
     const out = c.err('boom');
     expect(out).toContain('boom');
-    expect(out).toContain('[31m');
+    expect(out).toBe(pc.red('boom'));
+    if (pc.isColorSupported) {
+      expect(out).toContain('[31m');
+    }
   });
 
-  it('c.dim and c.bold both return strings that include the original text', () => {
+  it('c.dim and c.bold both round-trip the input through picocolors', () => {
+    expect(c.dim('quiet')).toBe(pc.dim('quiet'));
+    expect(c.bold('strong')).toBe(pc.bold('strong'));
     expect(c.dim('quiet')).toContain('quiet');
     expect(c.bold('strong')).toContain('strong');
   });

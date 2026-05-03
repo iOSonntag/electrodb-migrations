@@ -1,7 +1,19 @@
-import { describe, expect, it } from 'vitest';
-import { createSpinner, type Spinner } from '../../../../src/cli/output/spinner.js';
+import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type Spinner, createSpinner } from '../../../../src/cli/output/spinner.js';
 
 describe('spinner.ts (CLI-08 — wrapper around yocto-spinner)', () => {
+  let stderrSpy: MockInstance;
+
+  beforeEach(() => {
+    // Silence yocto-spinner's animation writes during tests so they don't
+    // leak into the vitest report. Spinner output goes to stderr by default.
+    stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    stderrSpy.mockRestore();
+  });
+
   it('createSpinner returns an object with the documented method surface', () => {
     const sp: Spinner = createSpinner('Loading...');
     expect(typeof sp.start).toBe('function');

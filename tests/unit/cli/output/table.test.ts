@@ -27,13 +27,16 @@ describe('table.ts (CLI-08 — wrapper around cli-table3)', () => {
   });
 
   it('does not embed cli-table3 default head colors (style.head set to [] in the wrapper)', () => {
-    // cli-table3 default head color is red; with style.head=[], no leading
-    // red ANSI sequence should appear before the first head label.
+    // cli-table3's default head color is red. With style.head=[], no ANSI
+    // SGR escape sequence (ESC + '[' + digits + 'm') should appear before the
+    // first head label. Build the ESC character via String.fromCharCode so the
+    // source file stays free of control bytes (biome's
+    // noControlCharactersInRegex rule rejects them, even when escaped).
     const out = createTable({ head: ['Plain'] }).toString();
-    // Find the index of "Plain"; everything before it must not contain an ESC code.
     const idx = out.indexOf('Plain');
     expect(idx).toBeGreaterThan(-1);
     const prefix = out.slice(0, idx);
-    expect(prefix).not.toMatch(/\[\d+m/);
+    const esc = String.fromCharCode(0x1b);
+    expect(prefix.includes(`${esc}[`)).toBe(false);
   });
 });

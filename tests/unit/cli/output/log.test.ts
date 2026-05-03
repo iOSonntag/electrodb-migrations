@@ -1,15 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { log } from '../../../../src/cli/output/log.js';
 
-const ORIGINAL_FORCE_COLOR = process.env.FORCE_COLOR;
-
+/**
+ * picocolors caches isColorSupported once at module load, so toggling
+ * FORCE_COLOR mid-test has no effect on the wrapped output. Assertions here
+ * use `toContain(<glyph>)` so they pass under both color-on and color-off
+ * environments — what matters is that:
+ *   1. every helper writes to stderr only (CLI-08 / CLI-09),
+ *   2. log.err with a remediation produces TWO writes (CLI-09).
+ */
 describe('log.ts (CLI-08, CLI-09 — stderr discipline + remediation suffix)', () => {
-  let stderrSpy: ReturnType<typeof vi.spyOn>;
-  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  // Use a permissive MockInstance type so we don't have to spell out the
+  // overload-rich `process.stderr.write` signature; what we care about in this
+  // suite is `mock.calls.length` and `mock.calls[i][0]`.
+  let stderrSpy: MockInstance;
+  let stdoutSpy: MockInstance;
 
   beforeEach(() => {
-    // Disable colors so byte-for-byte plaintext assertions are deterministic.
-    process.env.FORCE_COLOR = '0';
     stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   });
@@ -17,11 +24,6 @@ describe('log.ts (CLI-08, CLI-09 — stderr discipline + remediation suffix)', (
   afterEach(() => {
     stderrSpy.mockRestore();
     stdoutSpy.mockRestore();
-    if (ORIGINAL_FORCE_COLOR === undefined) {
-      delete process.env.FORCE_COLOR;
-    } else {
-      process.env.FORCE_COLOR = ORIGINAL_FORCE_COLOR;
-    }
   });
 
   it('log.info writes plain text + newline to stderr (no glyph)', () => {
@@ -77,19 +79,5 @@ describe('log.ts (CLI-08, CLI-09 — stderr discipline + remediation suffix)', (
     log.err('d');
     log.err('e', 'remediation');
     expect(stdoutSpy).toHaveBeenCalledTimes(0);
-  });
-
-  it('with FORCE_COLOR=1, log.ok output contains an ANSI escape sequence', () => {
-    process.env.FORCE_COLOR = '1';
-    // We need to re-import log so picocolors' lazy detection picks the new env.
-    // Easiest approach: assert that the *byte sequence* from FORCE_COLOR=1
-    // contains the ESC character somewhere (cannot be present at FORCE_COLOR=0).
-    // Note: picocolors caches isColorSupported at import time, so this assertion
-    // depends on import-order in the test runner. If colors do not appear here,
-    // we fall back to confirming behavior at FORCE_COLOR=0 instead (the bytes
-    // there are deterministic and that is what CLI-09 guarantees).
-    log.ok('green');
-    const written = String(stderrSpy.mock.calls.at(-1)?.[0]);
-    expect(written).toContain('green');
   });
 });
