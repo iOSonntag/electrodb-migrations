@@ -109,7 +109,7 @@ describe('public surface (src/index.ts)', () => {
   });
 
   it('functional smoke: EDBRollbackNotPossibleError carries reason in details', () => {
-    const err = new edbm.EDBRollbackNotPossibleError('cannot', { reason: 'no-down-fn' });
-    expect((err.details as { reason: string }).reason).toBe('no-down-fn');
+    const err = new edbm.EDBRollbackNotPossibleError('cannot', { reason: 'NO_DOWN_FUNCTION' });
+    expect((err.details as { reason: string }).reason).toBe('NO_DOWN_FUNCTION');
   });
 });

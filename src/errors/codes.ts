@@ -17,11 +17,17 @@ export const ERROR_CODES = {
   SELF_READ_IN_MIGRATION: 'EDB_SELF_READ_IN_MIGRATION',
 } as const;
 
-/** Reason codes carried in `EDBRollbackNotPossibleError.details.reason`. README §9.5. */
+/**
+ * Reason codes carried in `EDBRollbackNotPossibleError.details.reason`. README §9.5.
+ *
+ * SCREAMING_SNAKE_CASE — keys and values match. Sub-codes inside the already-
+ * `EDB_`-prefixed `EDB_ROLLBACK_NOT_POSSIBLE` error, so they intentionally do
+ * NOT carry an additional `EDB_` prefix.
+ */
 export const ROLLBACK_REASON_CODES = {
-  NO_DOWN_FN: 'no-down-fn',
-  NO_RESOLVER: 'no-resolver',
-  FINALIZED_ONLY_PROJECTED: 'finalized-only-projected',
+  NO_DOWN_FUNCTION: 'NO_DOWN_FUNCTION',
+  NO_RESOLVER: 'NO_RESOLVER',
+  FINALIZED_ONLY_PROJECTED: 'FINALIZED_ONLY_PROJECTED',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

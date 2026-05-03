@@ -28,11 +28,11 @@ describe('ERROR_CODES', () => {
 });
 
 describe('ROLLBACK_REASON_CODES', () => {
-  it('exposes the three ERR-05 reason codes', () => {
+  it('exposes the three ERR-05 reason codes in SCREAMING_SNAKE_CASE', () => {
     expect(ROLLBACK_REASON_CODES).toEqual({
-      NO_DOWN_FN: 'no-down-fn',
-      NO_RESOLVER: 'no-resolver',
-      FINALIZED_ONLY_PROJECTED: 'finalized-only-projected',
+      NO_DOWN_FUNCTION: 'NO_DOWN_FUNCTION',
+      NO_RESOLVER: 'NO_RESOLVER',
+      FINALIZED_ONLY_PROJECTED: 'FINALIZED_ONLY_PROJECTED',
     });
   });
 });

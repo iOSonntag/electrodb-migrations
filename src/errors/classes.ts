@@ -29,7 +29,7 @@ export class EDBRequiresRollbackError extends EDBMigrationError {
 /**
  * Thrown when a rollback strategy is not viable for the given lifecycle case.
  * `details.reason: RollbackReasonCode` carries the specific cause:
- * `'no-down-fn'`, `'no-resolver'`, or `'finalized-only-projected'`.
+ * `'NO_DOWN_FUNCTION'`, `'NO_RESOLVER'`, or `'FINALIZED_ONLY_PROJECTED'`.
  * Documented in README §9.5.
  */
 export class EDBRollbackNotPossibleError extends EDBMigrationError {

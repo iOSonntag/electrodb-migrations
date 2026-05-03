@@ -34,7 +34,7 @@ describe('ERR-02..08 concrete subclasses', () => {
   }
 
   it('rollback not possible carries reason in details', () => {
-    const err = new EDBRollbackNotPossibleError('cannot rollback', { reason: 'no-down-fn' });
-    expect(err.details).toEqual({ reason: 'no-down-fn' });
+    const err = new EDBRollbackNotPossibleError('cannot rollback', { reason: 'NO_DOWN_FUNCTION' });
+    expect(err.details).toEqual({ reason: 'NO_DOWN_FUNCTION' });
   });
 });
