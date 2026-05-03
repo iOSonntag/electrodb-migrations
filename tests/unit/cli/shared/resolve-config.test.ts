@@ -2,9 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resolveCliConfig } from '../../../../src/cli/shared/resolve-config.js';
 import { EDBConfigInvariantViolationError } from '../../../../src/config/invariants.js';
 import { EDBConfigLoadError } from '../../../../src/config/load.js';
-import { resolveCliConfig } from '../../../../src/cli/shared/resolve-config.js';
 
 let dir: string;
 
