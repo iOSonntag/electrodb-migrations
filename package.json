@@ -25,7 +25,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.12.0"
   },
   "keywords": [
     "electrodb",
@@ -49,10 +49,12 @@
   },
   "peerDependencies": {
     "@aws-sdk/client-dynamodb": ">=3.0.0",
-    "electrodb": ">=3.0.0"
+    "electrodb": ">=3.0.0 <4.0.0"
   },
   "dependencies": {
-    "commander": "^12.0.0"
+    "commander": "^14.0.0",
+    "jiti": "^2.6.0",
+    "ts-morph": "^25.0.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["@biomejs/biome", "esbuild"]
@@ -62,10 +64,10 @@
     "@aws-sdk/lib-dynamodb": "^3.0.0",
     "@biomejs/biome": "^1.9.0",
     "@types/node": "^22.0.0",
-    "@vitest/coverage-v8": "^2.0.0",
+    "@vitest/coverage-v8": "^2.1.0",
     "electrodb": "^3.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.5.0",
-    "vitest": "^2.0.0"
+    "vitest": "^2.1.0"
   }
 }
