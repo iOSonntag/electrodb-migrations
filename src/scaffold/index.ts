@@ -15,3 +15,5 @@ export type { RenderFrozenEntitySourceArgs } from './frozen-snapshot.js';
 export { computeIntegrityHash } from './integrity-hash.js';
 export { createMigrationId, formatTimestamp, sanitizeSlug } from './migration-id.js';
 export type { CreateMigrationIdArgs } from './migration-id.js';
+export { renderMigrationTemplate } from './templates.js';
+export type { RenderMigrationTemplateArgs } from './templates.js';
