@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  DEFAULT_GUARD,
-  DEFAULT_KEY_NAMES,
-  DEFAULT_LOCK,
-  DEFAULT_RUNNER,
-} from '../../../src/config/defaults.js';
+import { DEFAULT_GUARD, DEFAULT_KEY_NAMES, DEFAULT_LOCK, DEFAULT_RUNNER } from '../../../src/config/defaults.js';
 
 describe('DEFAULT_LOCK (CFG-06)', () => {
   it('heartbeatMs is 30_000', () => {
