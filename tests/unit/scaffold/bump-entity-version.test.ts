@@ -2,10 +2,7 @@ import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  bumpEntityVersion,
-  EDBEntitySourceEditError,
-} from '../../../src/scaffold/bump-entity-version.js';
+import { EDBEntitySourceEditError, bumpEntityVersion } from '../../../src/scaffold/bump-entity-version.js';
 
 const FIXTURE_ROOT = resolve(__dirname, '../../fixtures/user-entity-styles');
 
