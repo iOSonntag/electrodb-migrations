@@ -77,9 +77,7 @@ describe('discoverEntityFiles', () => {
   });
 
   it('throws when a configured path does not exist', async () => {
-    await expect(
-      discoverEntityFiles({ cwd: dir, entitiesConfig: 'does-not-exist' }),
-    ).rejects.toThrow();
+    await expect(discoverEntityFiles({ cwd: dir, entitiesConfig: 'does-not-exist' })).rejects.toThrow();
   });
 
   it('returns a sorted (deterministic) array', async () => {

@@ -15,7 +15,7 @@ describe('extractEntityMetadata', () => {
       modelVersion: '1',
       sourceFilePath: '/path/user.ts',
     });
-    expect(out[0].entityInstance).toBe(mod.User);
+    expect(out[0]?.entityInstance).toBe(mod.User);
   });
 
   it('returns multiple entities sorted alphabetically', () => {
@@ -35,7 +35,7 @@ describe('extractEntityMetadata', () => {
     };
     const out = extractEntityMetadata(mod, '/path/mixed.ts');
     expect(out).toHaveLength(1);
-    expect(out[0].entityName).toBe('User');
+    expect(out[0]?.entityName).toBe('User');
   });
 
   it('skips exports with model present but missing entity/service/version', () => {
@@ -52,8 +52,8 @@ describe('extractEntityMetadata', () => {
     };
     const out = extractEntityMetadata(mod, '/path/numeric.ts');
     expect(out).toHaveLength(1);
-    expect(out[0].modelVersion).toBe(1);
-    expect(typeof out[0].modelVersion).toBe('number');
+    expect(out[0]?.modelVersion).toBe(1);
+    expect(typeof out[0]?.modelVersion).toBe('number');
   });
 
   it('does not throw on null model (defensive narrowing)', () => {
@@ -71,7 +71,7 @@ describe('extractEntityMetadata', () => {
     };
     const out = extractEntityMetadata(mod, '/path/default.ts');
     expect(out).toHaveLength(1);
-    expect(out[0].entityName).toBe('User');
+    expect(out[0]?.entityName).toBe('User');
   });
 
   it('skips primitive exports without throwing', () => {
@@ -81,6 +81,6 @@ describe('extractEntityMetadata', () => {
     };
     const out = extractEntityMetadata(mod, '/path/mixed-primitives.ts');
     expect(out).toHaveLength(1);
-    expect(out[0].entityName).toBe('User');
+    expect(out[0]?.entityName).toBe('User');
   });
 });

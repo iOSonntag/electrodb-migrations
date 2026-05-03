@@ -1,13 +1,27 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { EDBUserEntityLoadError, loadEntityFile } from '../../../src/user-entities/load.js';
+
+// Tests that exercise jiti loading of files importing 'electrodb' must place
+// fixtures inside the project tree so Node's bare-specifier resolution can
+// walk up to the project's `node_modules/electrodb`. Writing fixtures into
+// `os.tmpdir()` causes ERR_MODULE_NOT_FOUND for the `electrodb` import — the
+// OS tmp dir is outside any package.json/node_modules ancestry.
+const FIXTURE_ROOT = resolve(__dirname, '../../../.tmp-tests/load');
 
 let dir: string;
 
+beforeAll(() => {
+  mkdirSync(FIXTURE_ROOT, { recursive: true });
+});
+
+afterAll(() => {
+  rmSync(FIXTURE_ROOT, { recursive: true, force: true });
+});
+
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'edbm-load-test-'));
+  dir = mkdtempSync(join(FIXTURE_ROOT, 'edbm-load-test-'));
 });
 
 afterEach(() => {
