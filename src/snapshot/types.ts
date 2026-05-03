@@ -26,4 +26,15 @@ export interface EntitySnapshotFile {
   fingerprint: string;
   /** The allowlisted projection of the entity's `entity.model`. Plan 08 defines the type. */
   projection: Record<string, unknown>;
+  /**
+   * Per-migration integrity hashes for the frozen `v1.ts` and `v2.ts` files
+   * scaffolded by `create`. SNP-03 (Phase 2). Optional and defaulted to []
+   * by the writer; v1 (schemaVersion: 1) snapshots may omit this field
+   * entirely, in which case the reader treats it as the empty array.
+   */
+  frozenSnapshots?: ReadonlyArray<{
+    migrationId: string;
+    v1Sha256: string;
+    v2Sha256: string;
+  }>;
 }

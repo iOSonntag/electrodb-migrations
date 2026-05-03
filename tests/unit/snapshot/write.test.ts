@@ -57,6 +57,8 @@ describe('writeJournal', () => {
 
 describe('writeEntitySnapshot', () => {
   it('round-trips with readEntitySnapshot', () => {
+    // Phase 2: writer normalizes frozenSnapshots to [] when omitted, and the
+    // reader propagates the field. The fixture mirrors the post-write shape.
     const path = join(dir, 'User.snapshot.json');
     const snap = {
       schemaVersion: 1,
@@ -67,6 +69,7 @@ describe('writeEntitySnapshot', () => {
         attributes: { id: { type: 'string', required: true } },
         indexes: { byId: { type: 'isolated', pk: { field: 'pk', composite: ['id'] } } },
       },
+      frozenSnapshots: [],
     };
     writeEntitySnapshot(path, snap);
     expect(readEntitySnapshot(path)).toEqual(snap);
@@ -113,5 +116,32 @@ describe('writeEntitySnapshot', () => {
     const raw = readFileSync(path, 'utf8');
     expect(raw.endsWith('\n')).toBe(true);
     expect(raw.endsWith('\n\n')).toBe(false);
+  });
+
+  it('defaults frozenSnapshots to [] when omitted from input (SNP-03)', () => {
+    const path = join(dir, 'default-frozen.json');
+    writeEntitySnapshot(path, { schemaVersion: 2, fingerprint: 'x', projection: {} });
+    const raw = readFileSync(path, 'utf8');
+    expect(raw).toContain('"frozenSnapshots"');
+    const parsed = JSON.parse(raw) as { frozenSnapshots: unknown[] };
+    expect(parsed.frozenSnapshots).toEqual([]);
+  });
+
+  it('preserves a non-empty frozenSnapshots array (round-trip via readEntitySnapshot)', () => {
+    const path = join(dir, 'with-frozen.json');
+    const snap = {
+      schemaVersion: 2,
+      fingerprint: 'sha256:abc',
+      projection: { entity: 'User', service: 'app', attributes: {}, indexes: {} },
+      frozenSnapshots: [
+        {
+          migrationId: '20260501083000-User-add-status',
+          v1Sha256: 'sha256:aaa',
+          v2Sha256: 'sha256:bbb',
+        },
+      ],
+    };
+    writeEntitySnapshot(path, snap);
+    expect(readEntitySnapshot(path)).toEqual(snap);
   });
 });

@@ -35,13 +35,18 @@ export function writeJournal(path: string, journal: JournalFile): void {
 }
 
 /**
- * Writes a per-entity snapshot file. SNP-01 + SNP-02 + SNP-04.
+ * Writes a per-entity snapshot file. SNP-01 + SNP-02 + SNP-03 + SNP-04.
+ *
+ * Phase 2: defaults `frozenSnapshots` to `[]` when omitted from the input.
+ * The `canonicalJson` recursive sort already orders the new field correctly
+ * (alphabetical between `fingerprint` and `projection` and `schemaVersion`).
  */
 export function writeEntitySnapshot(path: string, snapshot: EntitySnapshotFile): void {
   const payload: EntitySnapshotFile = {
     schemaVersion: snapshot.schemaVersion ?? FRAMEWORK_SNAPSHOT_VERSION,
     fingerprint: snapshot.fingerprint,
     projection: snapshot.projection,
+    frozenSnapshots: snapshot.frozenSnapshots ?? [],
   };
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, stringifyForSnapshot(payload), 'utf8');

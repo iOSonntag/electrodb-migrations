@@ -1,10 +1,12 @@
 import { EDBMigrationError } from '../errors/base.js';
 
 /**
- * The schemaVersion the v0.1 CLI understands. Bump (and add a migration path)
- * whenever the snapshot file format changes incompatibly. Pitfall #16.
+ * The schemaVersion the v0.1 CLI understands. v2 (Phase 2) added the optional
+ * `frozenSnapshots` array on EntitySnapshotFile; v1 readers tolerate the
+ * missing field. Bump (and add a migration path) whenever the snapshot file
+ * format changes incompatibly. Pitfall #16.
  */
-export const FRAMEWORK_SNAPSHOT_VERSION = 1 as const;
+export const FRAMEWORK_SNAPSHOT_VERSION = 2 as const;
 
 /**
  * Internal error class — NOT re-exported from `src/index.ts`. Thrown by the

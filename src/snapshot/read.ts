@@ -58,9 +58,20 @@ export function readEntitySnapshot(path: string): EntitySnapshotFile {
   if (typeof data.projection !== 'object' || data.projection === null) {
     throw new EDBSnapshotMalformedError(`Snapshot file missing projection (object): ${path}`, { path });
   }
-  return {
+  // SNP-03 (Phase 2): propagate the optional frozenSnapshots field. v1
+  // (schemaVersion: 1) snapshots may omit it entirely — in that case the
+  // result also omits the field (matches the type's optional shape). When
+  // present, it must be an array.
+  const result: EntitySnapshotFile = {
     schemaVersion: data.schemaVersion,
     fingerprint: data.fingerprint,
     projection: data.projection as Record<string, unknown>,
   };
+  if (data.frozenSnapshots !== undefined) {
+    if (!Array.isArray(data.frozenSnapshots)) {
+      throw new EDBSnapshotMalformedError(`Snapshot file frozenSnapshots must be an array: ${path}`, { path });
+    }
+    result.frozenSnapshots = data.frozenSnapshots as NonNullable<EntitySnapshotFile['frozenSnapshots']>;
+  }
+  return result;
 }

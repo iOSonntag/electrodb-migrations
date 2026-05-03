@@ -97,7 +97,7 @@ describe('readEntitySnapshot', () => {
 
   it('throws EDBSnapshotVersionTooNewError when schemaVersion > FRAMEWORK_SNAPSHOT_VERSION', () => {
     const path = join(dir, 'User.snapshot.json');
-    writeFileSync(path, JSON.stringify({ schemaVersion: 2, fingerprint: 'x', projection: {} }));
+    writeFileSync(path, JSON.stringify({ schemaVersion: 99, fingerprint: 'x', projection: {} }));
     expect(() => readEntitySnapshot(path)).toThrow(EDBSnapshotVersionTooNewError);
   });
 
