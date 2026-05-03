@@ -10,8 +10,6 @@ const baseConfig: ResolvedConfig = {
   keyNames: {
     partitionKey: 'pk',
     sortKey: 'sk',
-    electroEntity: '__edb_e__',
-    electroVersion: '__edb_v__',
   },
   lock: { heartbeatMs: 30_000, staleThresholdMs: 14_400_000, acquireWaitMs: 15_000 },
   guard: { cacheTtlMs: 5_000, blockMode: 'all' },

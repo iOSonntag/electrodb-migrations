@@ -95,6 +95,31 @@ describe('resolveConfig — built-in path defaults (CFG-12)', () => {
   });
 });
 
+describe('resolveConfig — keyNames identifier defaults (entry #1)', () => {
+  it('does NOT seed electroEntity / electroVersion when the user omits them', () => {
+    const out = resolveConfig(baseFile);
+    expect(out.keyNames.partitionKey).toBe('pk');
+    expect(out.keyNames.sortKey).toBe('sk');
+    expect(out.keyNames.electroEntity).toBeUndefined();
+    expect(out.keyNames.electroVersion).toBeUndefined();
+  });
+
+  it('forwards electroEntity when the user supplies it', () => {
+    const out = resolveConfig({ ...baseFile, keyNames: { electroEntity: 'my_e' } });
+    expect(out.keyNames.electroEntity).toBe('my_e');
+    expect(out.keyNames.electroVersion).toBeUndefined();
+  });
+
+  it('forwards both identifier fields when the user supplies both', () => {
+    const out = resolveConfig({
+      ...baseFile,
+      keyNames: { electroEntity: 'my_e', electroVersion: 'my_v' },
+    });
+    expect(out.keyNames.electroEntity).toBe('my_e');
+    expect(out.keyNames.electroVersion).toBe('my_v');
+  });
+});
+
 describe('resolveConfig — remote section spread (entries #3 / #5)', () => {
   it('returns remote: undefined when both layers omit it', () => {
     const out = resolveConfig({});

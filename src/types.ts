@@ -1,7 +1,9 @@
 /**
  * Mirrors ElectroDB's `EntityConfiguration['identifiers']`. The framework's
- * internal entities accept this so they can sit in a user table where the
- * default `__edb_e__` / `__edb_v__` identifier fields have been renamed.
+ * internal entities accept this so they can sit in a user table where
+ * ElectroDB's own `__edb_e__` / `__edb_v__` identifier fields have been
+ * renamed. The framework forwards this only when the user explicitly
+ * supplied it; otherwise ElectroDB's own defaults apply.
  */
 export type IdentifiersConfig = {
   entity?: string;

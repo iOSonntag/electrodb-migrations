@@ -83,7 +83,20 @@ export interface ResolvedConfig {
    * once the invariants pass has executed.
    */
   tableName: string | (() => string) | undefined;
-  keyNames: Required<NonNullable<MigrationsConfig['keyNames']>>;
+  /**
+   * Resolved key-name overrides. `partitionKey` / `sortKey` are always
+   * filled (from `DEFAULT_KEY_NAMES` if the user omitted them).
+   * `electroEntity` / `electroVersion` are intentionally kept optional —
+   * the framework only forwards an `identifiers` option to ElectroDB when
+   * the user explicitly supplied one, deferring to ElectroDB's own
+   * defaults otherwise.
+   */
+  keyNames: {
+    partitionKey: string;
+    sortKey: string;
+    electroEntity?: string;
+    electroVersion?: string;
+  };
   lock: Required<NonNullable<MigrationsConfig['lock']>>;
   guard: Required<NonNullable<MigrationsConfig['guard']>>;
   /**

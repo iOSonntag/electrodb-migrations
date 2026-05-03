@@ -26,10 +26,11 @@ import { DEFAULT_TABLE_KEYS, type InternalEntityOptions } from '../types.js';
  * use `Scan` with `FilterExpression` rather than requiring the user's table
  * to provision GSIs the framework's internal entities would otherwise need.
  *
- * Lives in the user's table by default; identifiers default to ElectroDB's
- * `__edb_e__` / `__edb_v__` but can be overridden when the user has
- * customized them on their own entities (see `EntityConfiguration` in
- * electrodb).
+ * Lives in the user's table by default. `identifiers` are forwarded to
+ * ElectroDB only when the user explicitly supplied
+ * `keyNames.electroEntity` / `keyNames.electroVersion`; otherwise the
+ * factory passes no `identifiers` option and ElectroDB uses whatever its
+ * own defaults are (see `EntityConfiguration` in electrodb).
  */
 export const createMigrationsEntity = (client: DynamoDBDocumentClient, table: string, options?: InternalEntityOptions) => {
   const pkField = options?.keyFields?.pk ?? DEFAULT_TABLE_KEYS.pk;

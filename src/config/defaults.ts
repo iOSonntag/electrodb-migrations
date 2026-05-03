@@ -57,13 +57,18 @@ export const DEFAULT_RUNNER: ResolvedConfig['runner'] = {
 };
 
 /**
- * Default DDB primary-key attribute names + ElectroDB identifier markers.
- * README §5.1.2. Override via `config.keyNames` when the user's table uses
- * different attribute names (e.g. `PK` / `SK`).
+ * Default DDB primary-key attribute names. README §5.1.2. Override via
+ * `config.keyNames` when the user's table uses different attribute names
+ * (e.g. `PK` / `SK`).
+ *
+ * ElectroDB's own `__edb_e__` / `__edb_v__` identifier markers are NOT
+ * redeclared here. When the user does not override `keyNames.electroEntity`
+ * / `keyNames.electroVersion`, the framework forwards no `identifiers`
+ * option to ElectroDB and ElectroDB uses its own defaults — so if a future
+ * ElectroDB version changes those marker names, this library does not
+ * silently freeze the old values.
  */
 export const DEFAULT_KEY_NAMES = {
   partitionKey: 'pk',
   sortKey: 'sk',
-  electroEntity: '__edb_e__',
-  electroVersion: '__edb_v__',
 } as const;

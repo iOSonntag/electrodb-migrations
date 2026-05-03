@@ -40,13 +40,16 @@ describe('DEFAULT_RUNNER (CFG-08)', () => {
 });
 
 describe('DEFAULT_KEY_NAMES (CFG-05)', () => {
-  it('matches the README §5.1.2 default attribute set', () => {
+  it('only ships the table primary-key attribute names; ElectroDB identifiers default upstream', () => {
     expect(DEFAULT_KEY_NAMES).toEqual({
       partitionKey: 'pk',
       sortKey: 'sk',
-      electroEntity: '__edb_e__',
-      electroVersion: '__edb_v__',
     });
+  });
+
+  it('does not freeze __edb_e__ / __edb_v__ as framework-shipped values', () => {
+    expect(DEFAULT_KEY_NAMES).not.toHaveProperty('electroEntity');
+    expect(DEFAULT_KEY_NAMES).not.toHaveProperty('electroVersion');
   });
 });
 
