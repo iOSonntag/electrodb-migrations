@@ -52,9 +52,12 @@
     "electrodb": ">=3.0.0 <4.0.0"
   },
   "dependencies": {
+    "cli-table3": "^0.6.5",
     "commander": "^14.0.0",
     "jiti": "^2.6.0",
-    "ts-morph": "^25.0.0"
+    "picocolors": "^1.1.0",
+    "ts-morph": "^25.0.0",
+    "yocto-spinner": "^1.1.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["@biomejs/biome", "esbuild"]

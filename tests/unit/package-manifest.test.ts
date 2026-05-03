@@ -34,4 +34,16 @@ describe('package.json manifest (FND-05)', () => {
   it('commander runtime dep is ^14', () => {
     expect(pkg.dependencies.commander).toMatch(/^\^14/);
   });
+
+  it('picocolors runtime dep is ^1.1.x or higher 1.x', () => {
+    expect(pkg.dependencies.picocolors).toMatch(/^\^1\.[1-9]/);
+  });
+
+  it('yocto-spinner runtime dep is ^1.1.x or higher 1.x', () => {
+    expect(pkg.dependencies['yocto-spinner']).toMatch(/^\^1\.[1-9]/);
+  });
+
+  it('cli-table3 runtime dep is ^0.6.5 or higher 0.6.x', () => {
+    expect(pkg.dependencies['cli-table3']).toMatch(/^\^0\.6\.[5-9]/);
+  });
 });
