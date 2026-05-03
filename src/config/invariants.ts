@@ -29,11 +29,7 @@ export function validateConfigInvariants(config: ResolvedConfig): void {
 
   if (cacheTtlMs >= acquireWaitMs) {
     throw new EDBConfigInvariantViolationError(
-      `Configuration violates the §5.3 timing invariant: ` +
-        `guard.cacheTtlMs (${cacheTtlMs}ms) must be strictly less than ` +
-        `lock.acquireWaitMs (${acquireWaitMs}ms). ` +
-        `Current headroom: ${acquireWaitMs - cacheTtlMs}ms (must be > 0). ` +
-        `See README §5.3 for tuning guidance.`,
+      `Configuration violates the §5.3 timing invariant: guard.cacheTtlMs (${cacheTtlMs}ms) must be strictly less than lock.acquireWaitMs (${acquireWaitMs}ms). Current headroom: ${acquireWaitMs - cacheTtlMs}ms (must be > 0). See README §5.3 for tuning guidance.`,
       { cacheTtlMs, acquireWaitMs, headroomMs: acquireWaitMs - cacheTtlMs },
     );
   }

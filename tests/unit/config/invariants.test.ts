@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  EDBConfigInvariantViolationError,
-  validateConfigInvariants,
-} from '../../../src/config/invariants.js';
+import { EDBConfigInvariantViolationError, validateConfigInvariants } from '../../../src/config/invariants.js';
 import type { ResolvedConfig } from '../../../src/config/types.js';
 
 const baseConfig: ResolvedConfig = {

@@ -25,10 +25,10 @@ export class EDBSnapshotVersionTooNewError extends EDBMigrationError {
  */
 export function assertSnapshotVersion(fileVersion: number, path: string): void {
   if (fileVersion > FRAMEWORK_SNAPSHOT_VERSION) {
-    throw new EDBSnapshotVersionTooNewError(
-      `Snapshot file ${path} has schemaVersion ${fileVersion}, but this CLI ` +
-        `understands at most ${FRAMEWORK_SNAPSHOT_VERSION}. Upgrade the CLI.`,
-      { path, fileVersion, frameworkVersion: FRAMEWORK_SNAPSHOT_VERSION },
-    );
+    throw new EDBSnapshotVersionTooNewError(`Snapshot file ${path} has schemaVersion ${fileVersion}, but this CLI ` + `understands at most ${FRAMEWORK_SNAPSHOT_VERSION}. Upgrade the CLI.`, {
+      path,
+      fileVersion,
+      frameworkVersion: FRAMEWORK_SNAPSHOT_VERSION,
+    });
   }
 }

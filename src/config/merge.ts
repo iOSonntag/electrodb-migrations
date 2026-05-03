@@ -1,9 +1,4 @@
-import {
-  DEFAULT_GUARD,
-  DEFAULT_KEY_NAMES,
-  DEFAULT_LOCK,
-  DEFAULT_RUNNER,
-} from './defaults.js';
+import { DEFAULT_GUARD, DEFAULT_KEY_NAMES, DEFAULT_LOCK, DEFAULT_RUNNER } from './defaults.js';
 import type { MigrationsConfig, ResolvedConfig } from './types.js';
 
 /**
@@ -17,18 +12,9 @@ import type { MigrationsConfig, ResolvedConfig } from './types.js';
  * merge supports two layers (file + overrides); the CLI / runtime callers
  * compose flag and runtime args into the `overrides` argument.
  */
-export function resolveConfig(
-  fileConfig: MigrationsConfig,
-  overrides: Partial<MigrationsConfig> = {},
-): ResolvedConfig {
-  const entitiesFromFile = Array.isArray(fileConfig.entities)
-    ? [...fileConfig.entities]
-    : [fileConfig.entities as string];
-  const entitiesFromOverride = overrides.entities
-    ? Array.isArray(overrides.entities)
-      ? [...overrides.entities]
-      : [overrides.entities as string]
-    : null;
+export function resolveConfig(fileConfig: MigrationsConfig, overrides: Partial<MigrationsConfig> = {}): ResolvedConfig {
+  const entitiesFromFile = Array.isArray(fileConfig.entities) ? [...fileConfig.entities] : [fileConfig.entities as string];
+  const entitiesFromOverride = overrides.entities ? (Array.isArray(overrides.entities) ? [...overrides.entities] : [overrides.entities as string]) : null;
 
   return {
     entities: entitiesFromOverride ?? entitiesFromFile,

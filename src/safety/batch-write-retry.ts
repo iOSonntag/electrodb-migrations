@@ -49,9 +49,7 @@ export interface BatchWriteRetryResult {
  *   triple in `details`. Reference: AWS Architecture Blog "Exponential
  *   Backoff and Jitter" (2015).
  */
-export async function withBatchWriteRetry<T>(
-  opts: BatchWriteRetryOptions<T>,
-): Promise<BatchWriteRetryResult> {
+export async function withBatchWriteRetry<T>(opts: BatchWriteRetryOptions<T>): Promise<BatchWriteRetryResult> {
   const items = [...opts.items];
   const maxAttempts = opts.maxAttempts ?? 5;
   const maxDelayMs = opts.maxDelayMs ?? 30_000;
@@ -79,11 +77,7 @@ export async function withBatchWriteRetry<T>(
   };
 
   if (pending.length > 0) {
-    throw new EDBBatchWriteExhaustedError(
-      `BatchWriteItem retry exhausted after ${maxAttempts} attempts: ` +
-        `${pending.length}/${scanned} items unprocessed`,
-      result,
-    );
+    throw new EDBBatchWriteExhaustedError(`BatchWriteItem retry exhausted after ${maxAttempts} attempts: ` + `${pending.length}/${scanned} items unprocessed`, { ...result });
   }
 
   return result;

@@ -2,11 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  EDBConfigLoadError,
-  findConfigPath,
-  loadConfigFile,
-} from '../../../src/config/load.js';
+import { EDBConfigLoadError, findConfigPath, loadConfigFile } from '../../../src/config/load.js';
 
 let dir: string;
 
@@ -47,20 +43,14 @@ describe('findConfigPath (CFG-02)', () => {
 describe('loadConfigFile (CFG-03 — jiti TS loading)', () => {
   it('loads a typescript config and returns its default export', async () => {
     const path = join(dir, 'electrodb-migrations.config.ts');
-    writeFileSync(
-      path,
-      `export default { entities: 'src/entities', migrations: 'm', tableName: 't' };`,
-    );
+    writeFileSync(path, `export default { entities: 'src/entities', migrations: 'm', tableName: 't' };`);
     const cfg = (await loadConfigFile(path)) as { tableName: string };
     expect(cfg.tableName).toBe('t');
   });
 
   it('loads a JSON config', async () => {
     const path = join(dir, 'electrodb-migrations.config.json');
-    writeFileSync(
-      path,
-      '{"entities":"src/entities","migrations":"m","tableName":"t"}',
-    );
+    writeFileSync(path, '{"entities":"src/entities","migrations":"m","tableName":"t"}');
     const cfg = (await loadConfigFile(path)) as { tableName: string };
     expect(cfg.tableName).toBe('t');
   });

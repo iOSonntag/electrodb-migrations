@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  EDBSnapshotVersionTooNewError,
-  FRAMEWORK_SNAPSHOT_VERSION,
-  assertSnapshotVersion,
-} from '../../../src/snapshot/version.js';
+import { EDBSnapshotVersionTooNewError, FRAMEWORK_SNAPSHOT_VERSION, assertSnapshotVersion } from '../../../src/snapshot/version.js';
 
 describe('FRAMEWORK_SNAPSHOT_VERSION', () => {
   it('is the literal 1', () => {

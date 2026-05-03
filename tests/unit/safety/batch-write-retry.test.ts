@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  EDBBatchWriteExhaustedError,
-  withBatchWriteRetry,
-} from '../../../src/safety/batch-write-retry.js';
+import { EDBBatchWriteExhaustedError, withBatchWriteRetry } from '../../../src/safety/batch-write-retry.js';
 
 describe('withBatchWriteRetry', () => {
   it('returns success on first try when there are no unprocessed items', async () => {
@@ -13,8 +10,8 @@ describe('withBatchWriteRetry', () => {
   });
 
   it('retries and succeeds eventually', async () => {
-    const responses = [{ unprocessed: [3] }, { unprocessed: [] }];
-    const write = vi.fn(async () => responses.shift()!);
+    const responses: { unprocessed: number[] }[] = [{ unprocessed: [3] }, { unprocessed: [] }];
+    const write = vi.fn(async () => responses.shift() ?? { unprocessed: [] as number[] });
     const out = await withBatchWriteRetry({ items: [1, 2, 3], write, maxDelayMs: 1 });
     expect(out).toEqual({ scanned: 3, written: 3, unprocessed: 0 });
     expect(write).toHaveBeenCalledTimes(2);
@@ -38,10 +35,10 @@ describe('withBatchWriteRetry', () => {
 
   it('passes the previous attempt unprocessed slice (not the original items) to the next write', async () => {
     const calls: number[][] = [];
-    const responses = [{ unprocessed: [2, 3] }, { unprocessed: [3] }, { unprocessed: [] }];
+    const responses: { unprocessed: number[] }[] = [{ unprocessed: [2, 3] }, { unprocessed: [3] }, { unprocessed: [] }];
     const write = vi.fn(async (batch: readonly number[]) => {
       calls.push([...batch]);
-      return responses.shift()!;
+      return responses.shift() ?? { unprocessed: [] as number[] };
     });
     await withBatchWriteRetry({ items: [1, 2, 3], write, maxDelayMs: 1 });
     expect(calls).toEqual([[1, 2, 3], [2, 3], [3]]);
@@ -49,8 +46,8 @@ describe('withBatchWriteRetry', () => {
 
   it('onRetry is invoked between attempts only (not before attempt 1, not after final success)', async () => {
     const onRetry = vi.fn();
-    const responses = [{ unprocessed: [3] }, { unprocessed: [3] }, { unprocessed: [] }];
-    const write = async () => responses.shift()!;
+    const responses: { unprocessed: number[] }[] = [{ unprocessed: [3] }, { unprocessed: [3] }, { unprocessed: [] }];
+    const write = async () => responses.shift() ?? { unprocessed: [] as number[] };
     await withBatchWriteRetry({ items: [1, 2, 3], write, maxDelayMs: 1, onRetry });
     // onRetry fires before attempt 2 and before attempt 3 → 2 invocations
     expect(onRetry).toHaveBeenCalledTimes(2);

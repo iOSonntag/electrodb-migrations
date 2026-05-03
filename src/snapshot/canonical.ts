@@ -15,9 +15,7 @@ function canonicalize(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value;
   if (Array.isArray(value)) return value.map(canonicalize);
   if (Object.getPrototypeOf(value) !== Object.prototype) {
-    throw new Error(
-      `canonicalJson: non-plain-object encountered (${Object.prototype.toString.call(value)})`,
-    );
+    throw new Error(`canonicalJson: non-plain-object encountered (${Object.prototype.toString.call(value)})`);
   }
   const sorted: Record<string, unknown> = {};
   for (const k of Object.keys(value as Record<string, unknown>).sort()) {

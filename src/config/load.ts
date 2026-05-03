@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { extname, join, resolve } from 'node:path';
 import { createJiti } from 'jiti';
 import { EDBMigrationError } from '../errors/base.js';
 
@@ -50,13 +50,13 @@ export function findConfigPath(cwd: string = process.cwd()): string | null {
  */
 export async function loadConfigFile(path: string): Promise<unknown> {
   try {
+    if (extname(path) === '.json') {
+      return JSON.parse(readFileSync(path, 'utf8'));
+    }
     const jiti = createJiti(import.meta.url, { tryNative: true });
     const mod = (await jiti.import(path)) as { default?: unknown };
     return mod.default ?? mod;
   } catch (err) {
-    throw new EDBConfigLoadError(
-      `Failed to load config file: ${path}\n${err instanceof Error ? err.message : String(err)}`,
-      { path, cause: err },
-    );
+    throw new EDBConfigLoadError(`Failed to load config file: ${path}\n${err instanceof Error ? err.message : String(err)}`, { path, cause: err });
   }
 }

@@ -91,7 +91,7 @@ describe('startHeartbeatScheduler', () => {
     });
     await sleep(20);
     expect(stopResolved).toBe(false);
-    resolveWork!();
+    if (resolveWork) (resolveWork as () => void)();
     await stopPromise;
     expect(stopResolved).toBe(true);
   });

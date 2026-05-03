@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  DEFAULT_GUARD,
-  DEFAULT_LOCK,
-  DEFAULT_RUNNER,
-} from '../../../src/config/defaults.js';
+import { DEFAULT_GUARD, DEFAULT_LOCK, DEFAULT_RUNNER } from '../../../src/config/defaults.js';
 import { resolveConfig } from '../../../src/config/merge.js';
 import type { MigrationsConfig } from '../../../src/config/types.js';
 
@@ -34,18 +30,12 @@ describe('resolveConfig (CFG-11 precedence chain)', () => {
   });
 
   it('overrides take precedence over file config', () => {
-    const out = resolveConfig(
-      { ...baseFile, lock: { heartbeatMs: 5_000 } },
-      { lock: { heartbeatMs: 1_000 } },
-    );
+    const out = resolveConfig({ ...baseFile, lock: { heartbeatMs: 5_000 } }, { lock: { heartbeatMs: 1_000 } });
     expect(out.lock.heartbeatMs).toBe(1_000);
   });
 
   it('multiple sections honor precedence independently', () => {
-    const out = resolveConfig(
-      { ...baseFile, guard: { cacheTtlMs: 1_000 } },
-      { lock: { heartbeatMs: 999 } },
-    );
+    const out = resolveConfig({ ...baseFile, guard: { cacheTtlMs: 1_000 } }, { lock: { heartbeatMs: 999 } });
     expect(out.guard.cacheTtlMs).toBe(1_000);
     expect(out.guard.blockMode).toBe('all');
     expect(out.lock.heartbeatMs).toBe(999);
@@ -63,10 +53,7 @@ describe('resolveConfig (CFG-11 precedence chain)', () => {
   });
 
   it('overrides.entities replaces file.entities entirely', () => {
-    const out = resolveConfig(
-      { ...baseFile, entities: ['file1', 'file2'] },
-      { entities: 'override-only' },
-    );
+    const out = resolveConfig({ ...baseFile, entities: ['file1', 'file2'] }, { entities: 'override-only' });
     expect(out.entities).toEqual(['override-only']);
   });
 
