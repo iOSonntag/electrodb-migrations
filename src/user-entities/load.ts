@@ -23,13 +23,21 @@ export class EDBUserEntityLoadError extends EDBMigrationError {
 /**
  * Load a TypeScript entity file via jiti.
  *
- * **Pitfall 4 mitigation — per-call `createJiti`.** jiti caches transpiled
- * output keyed by absolute path; reusing a long-lived jiti instance across
- * consecutive `create` invocations leaves stale modules in the cache when
- * the user has edited the entity file between runs. RESEARCH §Pitfall 4
+ * **Pitfall 4 mitigation — per-call `createJiti` with caches disabled.**
+ * jiti caches transpiled output in two places:
+ *   - `fsCache` (filesystem cache under `node_modules/.cache/jiti`) keyed
+ *     by absolute path + content hash
+ *   - `moduleCache` (Node's `require.cache` integration) keyed by absolute
+ *     path
+ * Reusing a long-lived jiti instance across consecutive `create` /
+ * `baseline` / `validate` invocations leaves stale modules in either cache
+ * when the user has edited the entity file between runs. RESEARCH §Pitfall 4
  * documents the failure mode (Windows FAT volumes with second-granularity
- * mtimes mask the staleness from jiti's invalidator). Constructing a fresh
- * jiti per call is a measured performance trade for correctness.
+ * mtimes mask the staleness from jiti's invalidator). The per-call
+ * `createJiti` plus `fsCache: false` + `moduleCache: false` ensures every
+ * call sees the file as it currently exists on disk — a measured
+ * performance trade for correctness. Verified by the
+ * "updates only the changed snapshot..." baseline test.
  *
  * Returns the loaded module namespace as `Record<string, unknown>` so the
  * caller (Plan 08's `inspect.ts`) can iterate exported keys without doing
@@ -37,7 +45,17 @@ export class EDBUserEntityLoadError extends EDBMigrationError {
  */
 export async function loadEntityFile(absolutePath: string): Promise<Record<string, unknown>> {
   try {
-    const jiti = createJiti(import.meta.url, { tryNative: true });
+    // `tryNative: false` is intentional: when the runtime supports native
+    // TS loading (Node 22.6+), jiti delegates to `import()` which carries
+    // Node's process-wide ESM module cache — that cache is NOT
+    // invalidated by `moduleCache: false` (which only governs jiti's own
+    // CJS require-cache integration). Forcing jiti's transpile path
+    // ensures we always parse the current file contents off disk.
+    const jiti = createJiti(import.meta.url, {
+      tryNative: false,
+      fsCache: false,
+      moduleCache: false,
+    });
     const mod = (await jiti.import(absolutePath)) as Record<string, unknown>;
     return mod;
   } catch (err) {

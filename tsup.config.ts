@@ -10,6 +10,10 @@ import { defineConfig, type Options } from 'tsup';
 const cliEntryPath = resolve(process.cwd(), 'src/cli/index.ts');
 const cliEntryExists = existsSync(cliEntryPath);
 
+const initCommandPath = resolve(process.cwd(), 'src/cli/commands/init.ts');
+const baselineCommandPath = resolve(process.cwd(), 'src/cli/commands/baseline.ts');
+const createCommandPath = resolve(process.cwd(), 'src/cli/commands/create.ts');
+
 const libraryConfig: Options = {
   // Library: dual ESM + CJS with type declarations.
   entry: { index: 'src/index.ts' },
@@ -22,9 +26,34 @@ const libraryConfig: Options = {
   tsconfig: 'tsconfig.build.json',
 };
 
+// CLI binary + per-subcommand modules. The bin entry's `tryImportRegistrar`
+// helper does a runtime `import('./commands/<name>.js')` against the file
+// living next to `dist/cli/index.js`, so each command module needs its own
+// emitted artifact at `dist/cli/commands/<name>.js`. Subcommand entries are
+// gated behind presence checks so the build still works in earlier-plan
+// states (Plan 05 ships the bin without commands; Plan 08 adds init/baseline;
+// Plan 09 adds create).
+const cliEntries: Record<string, string> = {};
+if (cliEntryExists) {
+  cliEntries['cli/index'] = 'src/cli/index.ts';
+}
+if (existsSync(initCommandPath)) {
+  cliEntries['cli/commands/init'] = 'src/cli/commands/init.ts';
+}
+if (existsSync(baselineCommandPath)) {
+  cliEntries['cli/commands/baseline'] = 'src/cli/commands/baseline.ts';
+}
+if (existsSync(createCommandPath)) {
+  cliEntries['cli/commands/create'] = 'src/cli/commands/create.ts';
+}
+
 const cliConfig: Options = {
-  // CLI binary: ESM only, shebang prepended, no type declarations needed.
-  entry: { 'cli/index': 'src/cli/index.ts' },
+  // CLI binary + commands: ESM only, shebang prepended (only the bin entry
+  // needs the shebang — tsup's `banner` applies to every emitted file in this
+  // config; that's harmless because Node ignores the shebang on `import`ed
+  // modules and the commands are only loaded via dynamic import, not run as
+  // executables).
+  entry: cliEntries,
   format: ['esm'],
   dts: false,
   sourcemap: false,

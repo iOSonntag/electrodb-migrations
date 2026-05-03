@@ -61,14 +61,17 @@ function setupProject(root: string): void {
        indexes: { primary: { pk: { field: 'pk', composite: ['id'] }, sk: { field: 'sk', composite: [] } } },
      });`,
   );
+  // Use a plain default-export shape (NOT `import { defineConfig } from 'electrodb-migrations'`)
+  // because the package's `dist/index.js` doesn't exist during unit-test runs
+  // — `defineConfig` is identity anyway. Same approach as
+  // tests/unit/cli/shared/resolve-config.test.ts.
   writeFileSync(
     join(root, 'electrodb-migrations.config.ts'),
-    `import { defineConfig } from 'electrodb-migrations';
-     export default defineConfig({
+    `export default {
        entities: 'src/entities',
        migrations: 'src/database/migrations',
        tableName: 'app_table',
-     });`,
+     };`,
   );
 }
 
@@ -160,12 +163,11 @@ describe('runBaseline (INI-03)', () => {
     mkdirSync(join(dir, 'src/entities'), { recursive: true });
     writeFileSync(
       join(dir, 'electrodb-migrations.config.ts'),
-      `import { defineConfig } from 'electrodb-migrations';
-       export default defineConfig({
+      `export default {
          entities: 'src/entities',
          migrations: 'src/database/migrations',
          tableName: 'app_table',
-       });`,
+       };`,
     );
 
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -183,14 +185,13 @@ describe('runBaseline (INI-03)', () => {
     // Replace the config with one that violates the invariant.
     writeFileSync(
       join(dir, 'electrodb-migrations.config.ts'),
-      `import { defineConfig } from 'electrodb-migrations';
-       export default defineConfig({
+      `export default {
          entities: 'src/entities',
          migrations: 'src/database/migrations',
          tableName: 'app_table',
          lock: { acquireWaitMs: 1000 },
          guard: { cacheTtlMs: 5000 },
-       });`,
+       };`,
     );
 
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -206,9 +207,7 @@ describe('runBaseline (INI-03)', () => {
 
     await runBaseline({ cwd: dir });
 
-    const userSnap = JSON.parse(
-      readFileSync(join(dir, '.electrodb-migrations/snapshots/User.snapshot.json'), 'utf8'),
-    ) as { fingerprint: string; schemaVersion: number };
+    const userSnap = JSON.parse(readFileSync(join(dir, '.electrodb-migrations/snapshots/User.snapshot.json'), 'utf8')) as { fingerprint: string; schemaVersion: number };
     expect(userSnap.fingerprint.startsWith('sha256:')).toBe(true);
     expect(userSnap.fingerprint.length).toBeGreaterThan('sha256:'.length + 16);
     expect(userSnap.schemaVersion).toBe(2);
