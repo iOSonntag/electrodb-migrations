@@ -1,13 +1,16 @@
 /**
- * `electrodb-migrations` v0.1 public surface — Phase 1 entries.
+ * `electrodb-migrations` v0.1 public surface.
  *
  * Phase 1 ships:
  * - Eight `EDB*` error classes (the abstract base + seven concrete subclasses)
  * - `isMigrationInProgress` duck-typed checker
  * - `defineConfig` factory + `MigrationsConfig` / `ResolvedConfig` types
  *
+ * Phase 2 adds:
+ * - `defineMigration` factory + `Migration<From, To>` type re-export (this file)
+ * - The `electrodb-migrations` CLI binary (separate `dist/cli/index.js` entry)
+ *
  * Later phases extend this surface:
- * - Phase 2 adds `defineMigration` + the CLI binary
  * - Phase 3 adds `createMigrationsClient` (programmatic API surface)
  * - Phase 9 adds `createLambdaMigrationHandler`
  *
@@ -34,3 +37,6 @@ export {
 
 export { defineConfig } from './config/index.js';
 export type { MigrationsConfig, ResolvedConfig } from './config/index.js';
+
+export { defineMigration } from './migrations/index.js';
+export type { Migration } from './migrations/index.js';
