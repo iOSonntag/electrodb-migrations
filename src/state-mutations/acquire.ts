@@ -1,7 +1,7 @@
 import type { ResolvedConfig } from '../config/index.js';
 import { EDBMigrationLockHeldError } from '../errors/index.js';
 import { MIGRATION_RUNS_SCHEMA_VERSION, MIGRATION_STATE_ID, type MigrationsServiceBundle, STATE_SCHEMA_VERSION } from '../internal-entities/index.js';
-import { extractCancellationReason, isConditionalCheckFailed } from './cancellation.js';
+import { type TransactionWriteResult, extractCancellationReason, extractResultCancellationReason, isConditionalCheckFailed, isResultConditionalCheckFailed } from './cancellation.js';
 
 /**
  * Inputs for the highest-stakes verb in the framework. Every field is
@@ -56,8 +56,9 @@ export async function acquire(service: MigrationsServiceBundle, config: Resolved
   const now = new Date().toISOString();
   const staleCutoff = new Date(Date.now() - config.lock.staleThresholdMs).toISOString();
 
+  let result: TransactionWriteResult;
   try {
-    await service.service.transaction
+    result = (await service.service.transaction
       .write(({ migrationState, migrationRuns }) => [
         // Item 0 — _migration_state (Pitfall #7 ordering)
         migrationState
@@ -94,8 +95,12 @@ export async function acquire(service: MigrationsServiceBundle, config: Resolved
           })
           .commit(),
       ])
-      .go();
+      .go()) as TransactionWriteResult;
   } catch (err) {
+    // Defense-in-depth: AWS SDK paths that bypass ElectroDB's wrapper still
+    // throw the raw TransactionCanceledException. The result-shape branch below
+    // handles the normal ElectroDB v3 path where the rejection is surfaced as
+    // `{canceled: true, data: [...]}`.
     if (isConditionalCheckFailed(err)) {
       const reason = extractCancellationReason(err);
       const item = reason?.item;
@@ -109,5 +114,18 @@ export async function acquire(service: MigrationsServiceBundle, config: Resolved
       });
     }
     throw err;
+  }
+
+  if (isResultConditionalCheckFailed(result)) {
+    const reason = extractResultCancellationReason(result);
+    const item = reason?.item;
+    throw new EDBMigrationLockHeldError('Lock currently held by another runner', {
+      currentLockState: item?.lockState,
+      currentLockHolder: item?.lockHolder,
+      currentRunId: item?.lockRunId,
+      currentLockMigrationId: item?.lockMigrationId,
+      currentHeartbeatAt: item?.heartbeatAt,
+      currentLockAcquiredAt: item?.lockAcquiredAt,
+    });
   }
 }

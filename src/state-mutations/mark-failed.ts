@@ -1,4 +1,6 @@
+import { EDBMigrationLockHeldError } from '../errors/index.js';
 import { MIGRATION_STATE_ID, type MigrationsServiceBundle } from '../internal-entities/index.js';
+import { type TransactionWriteResult, extractResultCancellationReason, isResultConditionalCheckFailed } from './cancellation.js';
 
 /** Inputs for {@link markFailed}. */
 export interface MarkFailedArgs {
@@ -36,7 +38,7 @@ export async function markFailed(service: MigrationsServiceBundle, args: MarkFai
   const now = new Date().toISOString();
   const errorMap = serializeCause(args.cause);
 
-  await service.service.transaction
+  const result = (await service.service.transaction
     .write(({ migrationState, migrationRuns }) => {
       const stateOp = migrationState.patch({ id: MIGRATION_STATE_ID }).set({ lockState: 'failed', heartbeatAt: now, updatedAt: now });
       // Branch on `migId` rather than passing an empty `.add({})` (which
@@ -55,7 +57,17 @@ export async function markFailed(service: MigrationsServiceBundle, args: MarkFai
           .commit(),
       ];
     })
-    .go();
+    .go()) as TransactionWriteResult;
+
+  if (isResultConditionalCheckFailed(result)) {
+    const reason = extractResultCancellationReason(result);
+    throw new EDBMigrationLockHeldError('markFailed refused — lock no longer held by this runner', {
+      currentLockState: reason?.item?.lockState,
+      currentLockHolder: reason?.item?.lockHolder,
+      currentRunId: reason?.item?.lockRunId,
+      currentLockMigrationId: reason?.item?.lockMigrationId,
+    });
+  }
 }
 
 interface ErrorMap {

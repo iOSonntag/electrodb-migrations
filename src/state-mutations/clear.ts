@@ -1,4 +1,6 @@
+import { EDBMigrationLockHeldError } from '../errors/index.js';
 import { MIGRATION_STATE_ID, type MigrationsServiceBundle } from '../internal-entities/index.js';
+import { type TransactionWriteResult, extractResultCancellationReason, isResultConditionalCheckFailed } from './cancellation.js';
 
 /** Inputs for {@link clear}. */
 export interface ClearArgs {
@@ -35,7 +37,7 @@ export interface ClearArgs {
 export async function clear(service: MigrationsServiceBundle, args: ClearArgs): Promise<void> {
   const now = new Date().toISOString();
 
-  await service.service.transaction
+  const result = (await service.service.transaction
     .write(({ migrationState }) => [
       migrationState
         .patch({ id: MIGRATION_STATE_ID })
@@ -44,5 +46,15 @@ export async function clear(service: MigrationsServiceBundle, args: ClearArgs): 
         .where(({ lockState, lockRunId, inFlightIds }, op) => `${op.eq(lockState, 'release')} AND ${op.eq(lockRunId, args.runId)} AND ${op.notExists(inFlightIds)}`)
         .commit(),
     ])
-    .go();
+    .go()) as TransactionWriteResult;
+
+  if (isResultConditionalCheckFailed(result)) {
+    const reason = extractResultCancellationReason(result);
+    throw new EDBMigrationLockHeldError('clear refused — release-mode lock conditions not met (lockState!=release, runId mismatch, or inFlightIds non-empty)', {
+      currentLockState: reason?.item?.lockState,
+      currentLockHolder: reason?.item?.lockHolder,
+      currentRunId: reason?.item?.lockRunId,
+      currentLockMigrationId: reason?.item?.lockMigrationId,
+    });
+  }
 }

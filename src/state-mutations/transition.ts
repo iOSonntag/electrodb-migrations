@@ -1,4 +1,6 @@
+import { EDBMigrationLockHeldError } from '../errors/index.js';
 import { MIGRATION_STATE_ID, type MigrationsServiceBundle } from '../internal-entities/index.js';
+import { type TransactionWriteResult, extractResultCancellationReason, isResultConditionalCheckFailed } from './cancellation.js';
 
 /** Inputs for {@link transitionToReleaseMode}. */
 export interface TransitionArgs {
@@ -52,7 +54,7 @@ export async function transitionToReleaseMode(service: MigrationsServiceBundle, 
   const now = new Date().toISOString();
   const isApply = args.outcome === 'applied';
 
-  await service.service.transaction
+  const result = (await service.service.transaction
     .write(({ migrationState, migrations, migrationRuns }) => [
       // Item 0 — _migration_state
       migrationState
@@ -78,5 +80,15 @@ export async function transitionToReleaseMode(service: MigrationsServiceBundle, 
         .set({ status: 'completed', completedAt: now, lastHeartbeatAt: now })
         .commit(),
     ])
-    .go();
+    .go()) as TransactionWriteResult;
+
+  if (isResultConditionalCheckFailed(result)) {
+    const reason = extractResultCancellationReason(result);
+    throw new EDBMigrationLockHeldError('transitionToReleaseMode refused — lock no longer held by this runner or not in apply/rollback state', {
+      currentLockState: reason?.item?.lockState,
+      currentLockHolder: reason?.item?.lockHolder,
+      currentRunId: reason?.item?.lockRunId,
+      currentLockMigrationId: reason?.item?.lockMigrationId,
+    });
+  }
 }

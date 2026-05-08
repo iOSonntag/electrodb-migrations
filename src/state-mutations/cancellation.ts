@@ -99,3 +99,48 @@ export function extractCancellationReason(err: unknown): CancellationReason | nu
     item: r.Item,
   };
 }
+
+/**
+ * Shape of `service.transaction.write(...).go()` in ElectroDB v3 — does NOT
+ * throw on cancellation; returns `{canceled: true, data: [{rejected, code, item, message}]}`.
+ * Per-item rejections include the lock-row diagnosis at index 0 (Pitfall #7).
+ */
+export interface TransactionWriteResult {
+  canceled: boolean;
+  data?: ReadonlyArray<{
+    rejected?: boolean;
+    code?: string;
+    message?: string;
+    item?: Record<string, unknown> | null;
+  }>;
+}
+
+/**
+ * Returns true iff the ElectroDB transactWrite result reports the lock-row
+ * mutation (item 0) was rejected by `ConditionalCheckFailed`. ElectroDB v3
+ * intercepts AWS SDK's `TransactionCanceledException` and surfaces it as
+ * `{canceled: true, data: [...]}` instead of re-throwing — every verb must
+ * inspect this result rather than relying on a try/catch.
+ */
+export function isResultConditionalCheckFailed(result: TransactionWriteResult): boolean {
+  if (!result.canceled) return false;
+  const item0 = result.data?.[0];
+  return item0?.rejected === true && item0.code === 'ConditionalCheckFailed';
+}
+
+/**
+ * Extract item-0's cancellation reason from the ElectroDB transactWrite result.
+ * Mirrors {@link extractCancellationReason} but for the `{canceled, data}` shape
+ * that ElectroDB returns instead of throwing.
+ */
+export function extractResultCancellationReason(result: TransactionWriteResult): CancellationReason | null {
+  if (!result.canceled) return null;
+  const item0 = result.data?.[0];
+  if (!item0?.rejected) return null;
+  const reason: CancellationReason = {
+    index: 0,
+    code: item0.code ?? 'Unknown',
+  };
+  if (item0.item) reason.item = item0.item;
+  return reason;
+}
