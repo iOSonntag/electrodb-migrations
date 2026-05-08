@@ -25,3 +25,5 @@ export {
   attachEventualConsistencyMiddleware,
   type EventualConsistencyHarness,
 } from './eventual-consistency.js';
+
+export { seedV1Records } from './seed-records.js';
