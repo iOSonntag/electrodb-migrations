@@ -73,24 +73,38 @@ export async function loadPendingMigrations(
   // Walk the migrations directory. On failure (ENOENT, etc.) return [] — no
   // pending migrations if the directory does not exist. This also short-circuits
   // the scan call (LP-1 invariant: scan is NOT called when the dir is empty/absent).
-  let entries: string[];
+  // Use `withFileTypes: true` so we can filter out non-directory entries
+  // (`.gitkeep`, `.DS_Store`, README files) that would otherwise produce a
+  // bogus `migration.ts` path and a swallowed load error.
+  let dirents: import('node:fs').Dirent[];
   try {
-    entries = await readdir(dir);
+    dirents = await readdir(dir, { withFileTypes: true });
   } catch {
     return [];
   }
+  const entries = dirents.filter((d) => d.isDirectory()).map((d) => d.name);
 
-  // If the directory is present but empty, skip the scan call entirely.
+  // If the directory is present but empty (or contains only non-directory
+  // entries), skip the scan call entirely.
   if (entries.length === 0) {
     return [];
   }
 
-  // Load each migration file. Failures (bad syntax, missing file) are silently
-  // skipped — the caller's validate gate (Phase 7) is the appropriate reporter.
+  // Load each migration file. Failures (bad syntax, missing file, evaluation
+  // errors) are surfaced to stderr so the operator gets a real signal rather
+  // than a misleading "all clear". Phase 7's validate gate is the formal
+  // reporter, but it has not shipped yet — and even once it does, an apply-time
+  // load failure that silently produces an empty pending list is the wrong
+  // default. The migration is still skipped from this run (so apply does not
+  // crash on a single broken file), but the operator now sees the cause.
   const onDisk: PendingMigration[] = [];
   for (const name of entries) {
     const migPath = join(dir, name, 'migration.ts');
-    const mig = await loadMigrationFile(migPath).catch(() => null);
+    const mig = await loadMigrationFile(migPath).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`[electrodb-migrations] Failed to load ${migPath}: ${msg}\n`);
+      return null;
+    });
     if (!mig) continue;
 
     // Extract version markers from the frozen entities. Both `from.model.version`
