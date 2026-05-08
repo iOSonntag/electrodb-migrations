@@ -10,8 +10,10 @@
  * - `defineMigration` factory + `Migration<From, To>` type re-export (this file)
  * - The `electrodb-migrations` CLI binary (separate `dist/cli/index.js` entry)
  *
+ * Phase 4 adds:
+ * - `createMigrationsClient` (programmatic API surface — API-01, API-02)
+ *
  * Later phases extend this surface:
- * - Phase 3 adds `createMigrationsClient` (programmatic API surface)
  * - Phase 9 adds `createLambdaMigrationHandler`
  *
  * Internal-only error classes (`EDBConfigLoadError`, `EDBSnapshotMalformedError`,
@@ -40,3 +42,6 @@ export type { MigrationsConfig, ResolvedConfig } from './config/index.js';
 
 export { defineMigration } from './migrations/index.js';
 export type { Migration } from './migrations/index.js';
+
+export { createMigrationsClient } from './client/index.js';
+export type { MigrationsClient } from './client/index.js';
