@@ -57,7 +57,7 @@ describe('state-mutations.markFailed (LCK-10 abort path)', () => {
     expect((stub.captured[1]?.set?.error as { code?: string }).code).toBe('EDB_TEST');
   });
 
-  it("error.code falls back to err.name when no .code is set", async () => {
+  it('error.code falls back to err.name when no .code is set', async () => {
     const stub = makeStubService();
     const cause = Object.assign(new Error('boom'), { name: 'TypeError' });
     await markFailed(stub.service as never, { runId: 'run-1', cause });
@@ -69,7 +69,7 @@ describe('state-mutations.markFailed (LCK-10 abort path)', () => {
     const stub = makeStubService();
     await markFailed(stub.service as never, { runId: 'run-1', cause: 'string-thrown' });
 
-    expect((stub.captured[1]?.set?.error as { code?: string; message?: string })).toMatchObject({
+    expect(stub.captured[1]?.set?.error as { code?: string; message?: string }).toMatchObject({
       code: 'Unknown',
       message: 'string-thrown',
     });

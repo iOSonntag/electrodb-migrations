@@ -31,22 +31,23 @@ export interface Captured {
  * `op` stub — mirrors ElectroDB's where-callback `op` API. Each method
  * returns a tagged string so tests can assert which operators appear inside
  * the composed condition.
+ *
+ * Convention: attribute names are PASSED THROUGH unquoted; only literal
+ * value arguments are JSON-encoded. This mirrors how ElectroDB's real where
+ * callback receives Symbol-proxied attribute names — for unit-test purposes
+ * we treat the destructure-result as a plain string identifier.
  */
 export const stubOp = {
   notExists: (a: string) => `notExists(${a})`,
   exists: (a: string) => `exists(${a})`,
-  eq: (a: unknown, v: unknown) => `eq(${stringify(a)},${stringify(v)})`,
-  ne: (a: unknown, v: unknown) => `ne(${stringify(a)},${stringify(v)})`,
-  lt: (a: unknown, v: unknown) => `lt(${stringify(a)},${stringify(v)})`,
-  gt: (a: unknown, v: unknown) => `gt(${stringify(a)},${stringify(v)})`,
-  contains: (a: unknown, v: unknown) => `contains(${stringify(a)},${stringify(v)})`,
+  eq: (a: string, v: unknown) => `eq(${a},${JSON.stringify(v)})`,
+  ne: (a: string, v: unknown) => `ne(${a},${JSON.stringify(v)})`,
+  lt: (a: string, v: unknown) => `lt(${a},${JSON.stringify(v)})`,
+  gt: (a: string, v: unknown) => `gt(${a},${JSON.stringify(v)})`,
+  contains: (a: string, v: unknown) => `contains(${a},${JSON.stringify(v)})`,
   size: (a: string) => `size(${a})`,
   value: (_a: string, v: unknown) => v,
 };
-
-function stringify(x: unknown): string {
-  return typeof x === 'string' && !x.includes('"') ? `"${x}"` : JSON.stringify(x);
-}
 
 /**
  * Stub attribute proxy — `({lockState, heartbeatAt}, op) => ...` destructures
@@ -160,17 +161,15 @@ export function makeStubService(transactionGoImpl?: () => Promise<unknown>): Stu
   }
 
   const goSpy = vi.fn(async () => (transactionGoImpl ? transactionGoImpl() : {}));
-  const writeFn = vi.fn(
-    (callback: (entities: Record<string, unknown>) => readonly unknown[]) => {
-      const items = callback({
-        migrationState: makeEntityStub('_migration_state'),
-        migrations: makeEntityStub('_migrations'),
-        migrationRuns: makeEntityStub('_migration_runs'),
-      });
-      void items.length;
-      return { go: goSpy };
-    },
-  );
+  const writeFn = vi.fn((callback: (entities: Record<string, unknown>) => readonly unknown[]) => {
+    const items = callback({
+      migrationState: makeEntityStub('_migration_state'),
+      migrations: makeEntityStub('_migrations'),
+      migrationRuns: makeEntityStub('_migration_runs'),
+    });
+    void items.length;
+    return { go: goSpy };
+  });
 
   const service = {
     service: { transaction: { write: writeFn } },

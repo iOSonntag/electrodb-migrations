@@ -14,7 +14,7 @@ describe('state-mutations.heartbeat (Pitfall #5 lockRunId condition)', () => {
     expect(stub.captured[0]?.op).toBe('patch');
   });
 
-  it("set updates heartbeatAt and updatedAt (and only those)", async () => {
+  it('set updates heartbeatAt and updatedAt (and only those)', async () => {
     const stub = makeStubService();
     await heartbeat(stub.service as never, { runId: 'run-1' });
 

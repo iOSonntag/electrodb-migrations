@@ -1,9 +1,9 @@
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { Service } from 'electrodb';
+import { type MigrationRunsEntity, createMigrationRunsEntity } from './migration-runs.js';
+import { type MigrationStateEntity, createMigrationStateEntity } from './migration-state.js';
+import { type MigrationsEntity, createMigrationsEntity } from './migrations.js';
 import type { InternalEntityOptions } from './types.js';
-import { createMigrationRunsEntity, type MigrationRunsEntity } from './migration-runs.js';
-import { createMigrationStateEntity, type MigrationStateEntity } from './migration-state.js';
-import { createMigrationsEntity, type MigrationsEntity } from './migrations.js';
 
 /**
  * Wraps the three internal entities in an ElectroDB `Service` so the

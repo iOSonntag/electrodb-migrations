@@ -17,15 +17,16 @@
  * `unlock` all rely on this; if a future verb emits items in a different
  * order, this helper will silently mis-attribute the failure.
  *
- * **Detection contract — `error.name`, never regex on `error.message`.**
- * AWS SDK v3 sets `.name = 'TransactionCanceledException'` reliably; the
- * message format is a documentation surface that may change between SDK
- * minor versions. The `is*` helper here therefore reads `.name`. Source:
- * `@aws-sdk/client-dynamodb` `TransactionCanceledException` class.
+ * **Detection contract — read the error's `name` field; do NOT regex on its
+ * message.** AWS SDK v3 sets `.name = 'TransactionCanceledException'`
+ * reliably; the message format is a documentation surface that may change
+ * between SDK minor versions. The `is*` helper here therefore reads `.name`.
+ * Source: `@aws-sdk/client-dynamodb` `TransactionCanceledException` class.
  *
- * The framework also intentionally does NOT use `instanceof` — under
- * dual ESM/CJS loading the class identity differs across module graphs and
- * the check fails silently. Pitfall #15 / README §9.1.
+ * The framework also intentionally avoids identity-checks against the SDK's
+ * concrete error classes — under dual ESM/CJS loading the class identity
+ * differs across module graphs and the check fails silently. Pitfall #15 /
+ * README §9.1.
  */
 
 /** Stable shape returned by {@link extractCancellationReason}. */

@@ -1,11 +1,6 @@
 import type { ResolvedConfig } from '../config/index.js';
 import { EDBMigrationLockHeldError } from '../errors/index.js';
-import {
-  MIGRATION_RUNS_SCHEMA_VERSION,
-  MIGRATION_STATE_ID,
-  type MigrationsServiceBundle,
-  STATE_SCHEMA_VERSION,
-} from '../internal-entities/index.js';
+import { MIGRATION_RUNS_SCHEMA_VERSION, MIGRATION_STATE_ID, type MigrationsServiceBundle, STATE_SCHEMA_VERSION } from '../internal-entities/index.js';
 import { extractCancellationReason, isConditionalCheckFailed } from './cancellation.js';
 
 /**
@@ -57,11 +52,7 @@ export interface AcquireArgs {
  * any current-holder details from `CancellationReasons[0].Item` (DDB Local may
  * omit ALL_OLD; details are then empty). All other errors are rethrown verbatim.
  */
-export async function acquire(
-  service: MigrationsServiceBundle,
-  config: ResolvedConfig,
-  args: AcquireArgs,
-): Promise<void> {
+export async function acquire(service: MigrationsServiceBundle, config: ResolvedConfig, args: AcquireArgs): Promise<void> {
   const now = new Date().toISOString();
   const staleCutoff = new Date(Date.now() - config.lock.staleThresholdMs).toISOString();
 

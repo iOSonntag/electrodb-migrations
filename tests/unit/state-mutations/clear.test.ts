@@ -24,15 +24,7 @@ describe('state-mutations.clear (LCK-09 release-refused-while-inflight)', () => 
     const stub = makeStubService();
     await clear(stub.service as never, { runId: 'run-1' });
 
-    expect(stub.captured[0]?.remove).toEqual(
-      expect.arrayContaining([
-        'lockHolder',
-        'lockRunId',
-        'lockMigrationId',
-        'lockAcquiredAt',
-        'heartbeatAt',
-      ]),
-    );
+    expect(stub.captured[0]?.remove).toEqual(expect.arrayContaining(['lockHolder', 'lockRunId', 'lockMigrationId', 'lockAcquiredAt', 'heartbeatAt']));
   });
 
   it("ConditionExpression mentions lockState='release', lockRunId, and inFlightIds emptiness (LCK-09)", async () => {

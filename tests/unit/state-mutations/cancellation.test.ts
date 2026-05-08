@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  type CancellationReason,
-  extractCancellationReason,
-  isConditionalCheckFailed,
-} from '../../../src/state-mutations/cancellation.js';
+import { type CancellationReason, extractCancellationReason, isConditionalCheckFailed } from '../../../src/state-mutations/cancellation.js';
 
 /**
  * Pitfall #7 — every state-mutations verb places `_migration_state` at item 0
@@ -23,10 +19,7 @@ describe('isConditionalCheckFailed (Pitfall #7 item-0 attribution)', () => {
   it('returns true even when later items have other codes — only item 0 matters', () => {
     const err = {
       name: 'TransactionCanceledException',
-      CancellationReasons: [
-        { Code: 'ConditionalCheckFailed', Item: { lockState: 'apply', lockHolder: 'host-A' } },
-        { Code: 'None' },
-      ],
+      CancellationReasons: [{ Code: 'ConditionalCheckFailed', Item: { lockState: 'apply', lockHolder: 'host-A' } }, { Code: 'None' }],
     };
     expect(isConditionalCheckFailed(err)).toBe(true);
   });
@@ -44,9 +37,7 @@ describe('isConditionalCheckFailed (Pitfall #7 item-0 attribution)', () => {
   });
 
   it('returns false when CancellationReasons is empty', () => {
-    expect(
-      isConditionalCheckFailed({ name: 'TransactionCanceledException', CancellationReasons: [] }),
-    ).toBe(false);
+    expect(isConditionalCheckFailed({ name: 'TransactionCanceledException', CancellationReasons: [] })).toBe(false);
   });
 
   it('returns false for a generic Error', () => {
@@ -104,7 +95,7 @@ describe('extractCancellationReason', () => {
     expect(reason?.item).toBeUndefined();
   });
 
-  it("returns null when CancellationReasons is missing", () => {
+  it('returns null when CancellationReasons is missing', () => {
     expect(extractCancellationReason(new Error('boom'))).toBeNull();
   });
 

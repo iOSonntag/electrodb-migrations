@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ResolvedConfig } from '../../../src/config/index.js';
-import { acquire, type AcquireArgs } from '../../../src/state-mutations/acquire.js';
+import { type AcquireArgs, acquire } from '../../../src/state-mutations/acquire.js';
 
 const baseConfig = {
   lock: { heartbeatMs: 30_000, staleThresholdMs: 14_400_000, acquireWaitMs: 15_000 },
@@ -121,19 +121,17 @@ function makeStubService(transactionGoImpl?: () => Promise<unknown>) {
   }
 
   const goSpy = vi.fn(async () => (transactionGoImpl ? transactionGoImpl() : {}));
-  const writeFn = vi.fn(
-    (callback: (entities: Record<string, unknown>) => readonly Captured[]) => {
-      const items = callback({
-        migrationState: makeEntityStub('_migration_state'),
-        migrations: makeEntityStub('_migrations'),
-        migrationRuns: makeEntityStub('_migration_runs'),
-      });
-      // Force-evaluate items so each commit() runs and pushes to captured.
-      // (callback's array drives evaluation already; this is for safety.)
-      void items.length;
-      return { go: goSpy };
-    },
-  );
+  const writeFn = vi.fn((callback: (entities: Record<string, unknown>) => readonly Captured[]) => {
+    const items = callback({
+      migrationState: makeEntityStub('_migration_state'),
+      migrations: makeEntityStub('_migrations'),
+      migrationRuns: makeEntityStub('_migration_runs'),
+    });
+    // Force-evaluate items so each commit() runs and pushes to captured.
+    // (callback's array drives evaluation already; this is for safety.)
+    void items.length;
+    return { go: goSpy };
+  });
 
   const service = {
     service: { transaction: { write: writeFn } },
