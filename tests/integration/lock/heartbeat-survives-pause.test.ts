@@ -21,7 +21,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MIGRATION_STATE_ID, createMigrationsService } from '../../../src/internal-entities/index.js';
 import { acquireLock, readLockRow, startLockHeartbeat } from '../../../src/lock/index.js';
-import { createTestTable, deleteTestTable, isDdbLocalReachable, makeDdbLocalClient, randomTableName, skipMessage } from '../_helpers/index.js';
+import { bootstrapMigrationState, createTestTable, deleteTestTable, isDdbLocalReachable, makeDdbLocalClient, randomTableName, skipMessage } from '../_helpers/index.js';
 
 // Fast heartbeat for tight test loops; staleThreshold is left long so
 // stale-takeover never fires accidentally during these scenarios.
@@ -37,7 +37,10 @@ describe('LCK-02 + LCK-10: heartbeat scheduling and abort', () => {
 
   beforeAll(async () => {
     alive = await isDdbLocalReachable();
-    if (alive) await createTestTable(raw, tableName);
+    if (alive) {
+      await createTestTable(raw, tableName);
+      await bootstrapMigrationState(doc, tableName);
+    }
   }, 30_000);
 
   afterAll(async () => {
@@ -75,6 +78,7 @@ describe('LCK-02 + LCK-10: heartbeat scheduling and abort', () => {
     // state cannot influence this run.
     const tableName2 = randomTableName('lck-10');
     await createTestTable(raw, tableName2);
+    await bootstrapMigrationState(doc, tableName2);
     try {
       const service = createMigrationsService(doc, tableName2);
       await acquireLock(service, fastConfig, { mode: 'apply', migId: 'mig-hb-fail', runId: 'r-hb-fail', holder: 'h' });

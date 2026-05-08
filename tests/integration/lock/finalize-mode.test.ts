@@ -15,7 +15,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createMigrationsService } from '../../../src/internal-entities/index.js';
 import { acquireLock, readLockRow } from '../../../src/lock/index.js';
-import { createTestTable, deleteTestTable, isDdbLocalReachable, makeDdbLocalClient, randomTableName, skipMessage } from '../_helpers/index.js';
+import { bootstrapMigrationState, createTestTable, deleteTestTable, isDdbLocalReachable, makeDdbLocalClient, randomTableName, skipMessage } from '../_helpers/index.js';
 
 const baseConfig = {
   lock: { heartbeatMs: 30_000, staleThresholdMs: 14_400_000, acquireWaitMs: 1_000 },
@@ -29,7 +29,10 @@ describe('LCK-06: finalize uses lockState="finalize"', () => {
 
   beforeAll(async () => {
     alive = await isDdbLocalReachable();
-    if (alive) await createTestTable(raw, tableName);
+    if (alive) {
+      await createTestTable(raw, tableName);
+      await bootstrapMigrationState(doc, tableName);
+    }
   }, 30_000);
 
   afterAll(async () => {

@@ -17,6 +17,7 @@
 import { randomUUID } from 'node:crypto';
 import { CreateTableCommand, DeleteTableCommand, DynamoDBClient, type DynamoDBClient as RawDynamoDBClient, waitUntilTableExists, waitUntilTableNotExists } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { MIGRATION_STATE_ID, STATE_SCHEMA_VERSION, createMigrationsService } from '../../../src/internal-entities/index.js';
 
 export const DDB_LOCAL_ENDPOINT = 'http://localhost:8000';
 
@@ -106,4 +107,26 @@ export const seedLockRow = async (doc: DynamoDBDocumentClient, tableName: string
       },
     }),
   );
+};
+
+/**
+ * Seed `_migration_state` at `lockState='free'` via the framework's own Service.
+ *
+ * Mirrors what `init` does in production: writes the row at the ElectroDB
+ * composite-key location so subsequent `acquireLock` / `migrationState.patch(...)`
+ * calls satisfy ElectroDB's implicit `attribute_exists(pk) AND attribute_exists(sk)`
+ * check (clauses.js:621-624). Without this seed, the FIRST acquireLock against a
+ * fresh table fails with `EDBMigrationLockHeldError` because patch() refuses to
+ * touch a non-existent row regardless of the test's own ConditionExpression.
+ */
+export const bootstrapMigrationState = async (doc: DynamoDBDocumentClient, tableName: string): Promise<void> => {
+  const bundle = createMigrationsService(doc, tableName);
+  await bundle.migrationState
+    .put({
+      id: MIGRATION_STATE_ID,
+      schemaVersion: STATE_SCHEMA_VERSION,
+      updatedAt: new Date().toISOString(),
+      lockState: 'free',
+    })
+    .go();
 };

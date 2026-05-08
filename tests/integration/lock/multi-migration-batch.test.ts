@@ -26,7 +26,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MIGRATIONS_SCHEMA_VERSION, MIGRATION_STATE_ID, createMigrationsService } from '../../../src/internal-entities/index.js';
 import { acquireLock, readLockRow } from '../../../src/lock/index.js';
 import { appendInFlight, clear, transitionToReleaseMode } from '../../../src/state-mutations/index.js';
-import { createTestTable, deleteTestTable, isDdbLocalReachable, makeDdbLocalClient, randomTableName, skipMessage } from '../_helpers/index.js';
+import { bootstrapMigrationState, createTestTable, deleteTestTable, isDdbLocalReachable, makeDdbLocalClient, randomTableName, skipMessage } from '../_helpers/index.js';
 
 const fastConfig = {
   lock: { heartbeatMs: 30_000, staleThresholdMs: 14_400_000, acquireWaitMs: 500 },
@@ -40,7 +40,10 @@ describe('LCK-05 + LCK-09: multi-migration batch handoff and inFlight-non-empty 
 
   beforeAll(async () => {
     alive = await isDdbLocalReachable();
-    if (alive) await createTestTable(raw, tableName);
+    if (alive) {
+      await createTestTable(raw, tableName);
+      await bootstrapMigrationState(doc, tableName);
+    }
   }, 30_000);
 
   afterAll(async () => {
@@ -110,6 +113,7 @@ describe('LCK-05 + LCK-09: multi-migration batch handoff and inFlight-non-empty 
     }
     const tableName2 = randomTableName('lck-09');
     await createTestTable(raw, tableName2);
+    await bootstrapMigrationState(doc, tableName2);
     try {
       const service = createMigrationsService(doc, tableName2);
       // Acquire writes inFlightIds={mig-stuck}, lockState='apply'.

@@ -18,7 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ERROR_CODES } from '../../../src/errors/index.js';
 import { createMigrationsService } from '../../../src/internal-entities/index.js';
 import { acquireLock } from '../../../src/lock/index.js';
-import { createTestTable, deleteTestTable, isDdbLocalReachable, makeDdbLocalClient, raceAcquires, randomTableName, skipMessage } from '../_helpers/index.js';
+import { bootstrapMigrationState, createTestTable, deleteTestTable, isDdbLocalReachable, makeDdbLocalClient, raceAcquires, randomTableName, skipMessage } from '../_helpers/index.js';
 
 // `as never` cast: tests synthesize a partial ResolvedConfig — only the lock
 // + guard tunings are read by the orchestrators under test. The full config
@@ -38,6 +38,7 @@ describe('LCK-01: concurrent acquireLock — exactly one winner', () => {
     alive = await isDdbLocalReachable();
     if (!alive) return;
     await createTestTable(raw, tableName);
+    await bootstrapMigrationState(doc, tableName);
   }, 30_000);
 
   afterAll(async () => {

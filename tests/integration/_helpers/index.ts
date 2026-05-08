@@ -14,6 +14,7 @@ export {
   makeDdbLocalClient,
   randomTableName,
   seedLockRow,
+  bootstrapMigrationState,
 } from './ddb-local.js';
 
 export { isDdbLocalReachable, skipMessage } from './docker-availability.js';

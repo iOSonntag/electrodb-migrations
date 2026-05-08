@@ -21,7 +21,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { MIGRATION_STATE_ID, STATE_SCHEMA_VERSION, createMigrationsService } from '../../../src/internal-entities/index.js';
 import { acquireLock, forceUnlock, readLockRow } from '../../../src/lock/index.js';
-import { createTestTable, deleteTestTable, isDdbLocalReachable, makeDdbLocalClient, randomTableName, skipMessage } from '../_helpers/index.js';
+import { bootstrapMigrationState, createTestTable, deleteTestTable, isDdbLocalReachable, makeDdbLocalClient, randomTableName, skipMessage } from '../_helpers/index.js';
 
 const baseConfig = {
   lock: { heartbeatMs: 30_000, staleThresholdMs: 14_400_000, acquireWaitMs: 1_000 },
@@ -49,6 +49,7 @@ describe('LCK-08: forceUnlock state-aware truth table', () => {
       }
       currentTable = randomTableName(`lck-08-${activeState}`);
       await createTestTable(raw, currentTable);
+      await bootstrapMigrationState(doc, currentTable);
       const service = createMigrationsService(doc, currentTable);
       // Seed via acquireLock(mode='apply') so the row layout (composite-key
       // prefixes, ElectroDB identifier markers, inFlightIds) matches production.
