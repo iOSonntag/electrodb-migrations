@@ -69,13 +69,7 @@ const PHASE_3_REQUIREMENT_IDS: readonly string[] = [
  *
  * **Goal state:** empty array. Every entry is a tracked gap.
  */
-const KNOWN_GAPS: readonly { id: string; reason: string }[] = [
-  {
-    id: 'LCK-06',
-    reason:
-      'No Phase 3 test references LCK-06. The ID is not present in src/, tests/, or any Phase 3 SUMMARY. Plan 03-08 surfaces this as an orchestrator follow-up rather than silently inserting the literal — see 03-08-SUMMARY.md "Phase-3 Coverage Gaps" section. Resolution: orchestrator confirms the LCK-06 requirement scope and routes a quick task to add the missing test (or removes the ID if it has been deprecated upstream).',
-  },
-];
+const KNOWN_GAPS: readonly { id: string; reason: string }[] = [];
 
 const TEST_ROOTS: readonly string[] = ['tests/unit', 'tests/integration'];
 
