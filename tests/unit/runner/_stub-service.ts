@@ -161,6 +161,20 @@ export interface RunnerStubService {
   setScanPages: (pages: Array<Array<Record<string, unknown>>>) => void;
   setGetResult: (result: { data: Record<string, unknown> | null }) => void;
   batchWriteSendSpy: ReturnType<typeof vi.fn>;
+  /**
+   * DynamoDB document client stub whose `.send` is `batchWriteSendSpy`.
+   * Used by `batch-flush.ts` tests to assert RequestItems shape.
+   */
+  client: { send: ReturnType<typeof vi.fn> };
+  /**
+   * Factory for a minimal Migration-shaped stub: `{from: {scan: {go}}, to: {put(record).params()}}`.
+   * Used by `batch-flush.ts` and downstream tests that compose against a Migration value
+   * rather than a service bundle.
+   */
+  makeMigration: () => {
+    from: { scan: { go: ReturnType<typeof vi.fn> } };
+    to: { put: (record: unknown) => { params: () => Record<string, unknown> } };
+  };
 }
 
 /**
@@ -217,6 +231,24 @@ export function makeRunnerStubService(): RunnerStubService {
     migrationRuns,
   };
 
+  const client = { send: batchWriteSendSpy };
+
+  const makeMigration = () => {
+    const scanGo = vi.fn(async (_opts?: { cursor?: string | null; limit?: number }) => {
+      const page = migrationStatePagesQueue.shift();
+      if (!page) return { data: [], cursor: null };
+      return { data: page, cursor: migrationStatePagesQueue.length > 0 ? 'next' : null };
+    });
+    return {
+      from: { scan: { go: scanGo } },
+      to: {
+        put: (record: unknown) => ({
+          params: () => record as Record<string, unknown>,
+        }),
+      },
+    };
+  };
+
   return {
     service: service as RunnerStubService['service'],
     captured,
@@ -231,5 +263,7 @@ export function makeRunnerStubService(): RunnerStubService {
       getResult = result;
     },
     batchWriteSendSpy,
+    client,
+    makeMigration,
   };
 }
