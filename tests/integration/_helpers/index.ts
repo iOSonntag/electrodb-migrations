@@ -1,10 +1,6 @@
 /**
  * Barrel for integration test helpers. All symbols are named explicitly — never
  * `export *` — so the test surface stays auditable.
- *
- * The eventual-consistency simulator (`./eventual-consistency.js`) is added by
- * Task 2 of Plan 03-01. Until that lands, only the lifecycle / availability /
- * race helpers are re-exported here.
  */
 
 export {
@@ -23,3 +19,8 @@ export {
 export { isDdbLocalReachable, skipMessage } from './docker-availability.js';
 
 export { raceAcquires, type RaceResult } from './concurrent-acquire.js';
+
+export {
+  attachEventualConsistencyMiddleware,
+  type EventualConsistencyHarness,
+} from './eventual-consistency.js';
