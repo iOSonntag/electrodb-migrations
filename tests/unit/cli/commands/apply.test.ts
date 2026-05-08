@@ -118,25 +118,20 @@ describe('runApply (RUN-06/07/09)', () => {
     expect(fakeClient.history).not.toHaveBeenCalled();
   });
 
-  it('A-2: single migration success — summary with next-steps written to stderr', async () => {
+  it('A-2: single migration success — spinner success message written to stderr; RUN-09 summary emitted by client.apply()', async () => {
     vi.mocked(resolveCliConfig).mockResolvedValue({
       config: STUB_CONFIG as never,
       configPath: '/fake/config.ts',
       cwd: '/fake',
     });
+    // The mocked client.apply() returns the applied list; the real client.apply()
+    // also writes the RUN-09 summary to stderr. Unit tests mock the client, so the
+    // summary comes from the mock's return — the integration test in
+    // apply-happy-path-1k.test.ts pins the actual stderr content end-to-end.
     const fakeClient = makeClient({
       apply: vi.fn().mockResolvedValue({
         applied: [{ migId: 'mig-1', itemCounts: { scanned: 100, migrated: 100, skipped: 0, failed: 0 } }],
       }),
-      history: vi.fn().mockResolvedValue([
-        {
-          id: 'mig-1',
-          entityName: 'User',
-          fromVersion: '1',
-          toVersion: '2',
-          status: 'applied',
-        },
-      ]),
     });
     vi.mocked(createMigrationsClient).mockReturnValue(fakeClient as never);
 
@@ -149,12 +144,10 @@ describe('runApply (RUN-06/07/09)', () => {
     await runApply({ cwd: '/fake' });
 
     const stderr = stderrChunks.join('');
-    // Spinner success + summary
+    // Spinner success message is written by the CLI.
     expect(stderr).toContain('Applied 1 migration');
-    // RUN-09: next-steps remediation from renderApplySummary
-    expect(stderr).toContain('Run `electrodb-migrations release` after deploying the new code');
-    // Summary is on stderr (NOT stdout) — verify history was called
-    expect(fakeClient.history).toHaveBeenCalledOnce();
+    // history() is no longer called by the CLI (the programmatic client handles the summary).
+    expect(fakeClient.history).not.toHaveBeenCalled();
   });
 
   it('A-3: RUN-06 sequence rejection — EDB_NOT_NEXT_PENDING: message+remediation on stderr, exits USER_ERROR', async () => {

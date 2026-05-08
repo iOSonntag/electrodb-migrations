@@ -3,4 +3,4 @@
 export { createLockStateCache, type LockStateCache, type LockStateValue } from './cache.js';
 export { isReadCommand } from './classify.js';
 export { GATING_LOCK_STATES } from './lock-state-set.js';
-export { wrapClient, type WrapClientArgs } from './wrap.js';
+export { wrapClient, runUnguarded, type WrapClientArgs } from './wrap.js';
