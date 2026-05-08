@@ -27,19 +27,25 @@ interface CapturedSchedulerOpts {
 
 let capturedOpts: CapturedSchedulerOpts | null;
 let stopSpy: ReturnType<typeof vi.fn>;
-let startHeartbeatSchedulerSpy: ReturnType<typeof vi.spyOn<typeof safety, 'startHeartbeatScheduler'>>;
-let heartbeatSpy: ReturnType<typeof vi.spyOn<typeof stateMutations, 'heartbeat'>>;
-let markFailedSpy: ReturnType<typeof vi.spyOn<typeof stateMutations, 'markFailed'>>;
+let startHeartbeatSchedulerSpy: ReturnType<typeof vi.fn>;
+let heartbeatSpy: ReturnType<typeof vi.fn>;
+let markFailedSpy: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   capturedOpts = null;
   stopSpy = vi.fn(async () => {});
-  startHeartbeatSchedulerSpy = vi.spyOn(safety, 'startHeartbeatScheduler').mockImplementation((opts) => {
-    capturedOpts = opts as CapturedSchedulerOpts;
+  // Reassign the module exports' bindings directly. ESM live bindings make
+  // this work for re-exports (the consuming `src/lock/heartbeat.ts` imports
+  // through the same module identity).
+  startHeartbeatSchedulerSpy = vi.fn((opts: CapturedSchedulerOpts) => {
+    capturedOpts = opts;
     return { stop: stopSpy };
   });
-  heartbeatSpy = vi.spyOn(stateMutations, 'heartbeat').mockResolvedValue();
-  markFailedSpy = vi.spyOn(stateMutations, 'markFailed').mockResolvedValue();
+  heartbeatSpy = vi.fn(async () => {});
+  markFailedSpy = vi.fn(async () => {});
+  vi.spyOn(safety, 'startHeartbeatScheduler').mockImplementation(startHeartbeatSchedulerSpy as never);
+  vi.spyOn(stateMutations, 'heartbeat').mockImplementation(heartbeatSpy as never);
+  vi.spyOn(stateMutations, 'markFailed').mockImplementation(markFailedSpy as never);
 });
 
 afterEach(() => {
