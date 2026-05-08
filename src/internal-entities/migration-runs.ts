@@ -1,6 +1,6 @@
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { Entity } from 'electrodb';
-import { DEFAULT_TABLE_KEYS, type InternalEntityOptions } from '../types.js';
+import { DEFAULT_TABLE_KEYS, type InternalEntityOptions } from './types.js';
 
 /**
  * `_migration_runs`: durable record of one lock cycle on one migration —
@@ -55,6 +55,15 @@ export const createMigrationRunsEntity = (client: DynamoDBDocumentClient, table:
             details: { type: 'string' },
           },
         },
+        // Phase 3 delta (ENT-04):
+        /**
+         * Last heartbeat timestamp written by the runner during this run. Updated on every state
+         * transition (acquire, transition-to-release, mark-failed) and on final completion. Phase 9's
+         * `getRunStatus(runId)` reads this single row after the run completes — eliminating the
+         * cross-row read that would otherwise be required to surface heartbeat freshness on the run
+         * record. (ARCHITECTURE.md §11.)
+         */
+        lastHeartbeatAt: { type: 'string' },
       },
       indexes: {
         byRunId: {
