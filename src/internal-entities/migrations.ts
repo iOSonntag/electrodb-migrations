@@ -1,6 +1,6 @@
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { Entity } from 'electrodb';
-import { DEFAULT_TABLE_KEYS, type InternalEntityOptions } from '../types.js';
+import { DEFAULT_TABLE_KEYS, type InternalEntityOptions } from './types.js';
 
 /**
  * `_migrations`: durable, write-once-then-update audit row per migration.
@@ -78,6 +78,33 @@ export const createMigrationsEntity = (client: DynamoDBDocumentClient, table: st
             details: { type: 'string' },
           },
         },
+        // Phase 3 deltas (ENT-03, CTX-06):
+        /**
+         * Cross-entity reads declared on `defineMigration({reads: [Other, ...]})`. Persisted at apply
+         * time so the validate gate (Phase 7, VAL-05) and Phase 6's `ctx.entity()` proxy can enforce
+         * cross-entity ordering without re-importing the migration source. Set type for cardinality
+         * 0..N.
+         */
+        reads: { type: 'set', items: 'string' },
+        /**
+         * The strategy used by the most recent rollback attempt; `null`/absent until the migration
+         * is reverted. Phase 5 (RBK-05/06/07/08) writes this value at rollback time so the audit
+         * trail records WHICH strategy executed, not just that the migration was reverted.
+         */
+        rollbackStrategy: {
+          type: ['projected', 'snapshot', 'fill-only', 'custom'] as const,
+        },
+        /**
+         * Captured at apply time from the migration object so post-finalize rollback (Phase 5,
+         * RBK-09) can refuse `--strategy projected`/`fill-only` without re-importing the migration
+         * source.
+         */
+        hasDown: { type: 'boolean' },
+        /**
+         * Captured at apply time so post-finalize rollback can refuse `--strategy custom` without
+         * re-importing.
+         */
+        hasRollbackResolver: { type: 'boolean' },
       },
       indexes: {
         byId: {

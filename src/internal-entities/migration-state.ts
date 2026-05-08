@@ -1,6 +1,6 @@
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { Entity } from 'electrodb';
-import { DEFAULT_TABLE_KEYS, type InternalEntityOptions } from '../types.js';
+import { DEFAULT_TABLE_KEYS, type InternalEntityOptions } from './types.js';
 
 /**
  * `_migration_state`: single aggregate row that the guard reads with one `GetItem`.
@@ -34,6 +34,12 @@ import { DEFAULT_TABLE_KEYS, type InternalEntityOptions } from '../types.js';
  *   writes may remain on disk; app traffic stays gated until the operator
  *   runs `rollback` to clean up. Distinct from a stale `apply` state —
  *   `failed` is **not** subject to stale-takeover.
+ * - `dying` — added in v0.1 schema version 1 to support graceful-exit
+ *   signaling (per ENT-02 + RESEARCH.md A6). Set by a runner that has
+ *   received a termination signal and is winding down so heartbeat updates
+ *   from sibling processes don't race the takeover decision; takeoverable
+ *   per LCK-03 once `heartbeatAt` is stale on the same threshold as the
+ *   live working states.
  *
  * Liveness during an active run is signaled by `heartbeatAt` freshness —
  * there is no separate phase enum, and per-record progress is intentionally
@@ -45,6 +51,12 @@ import { DEFAULT_TABLE_KEYS, type InternalEntityOptions } from '../types.js';
  * Sets (not lists) for the three id collections: DDB's `SS` type supports
  * value-based add/delete inside transactions; lists only support
  * remove-by-index.
+ *
+ * **Reserved-namespace assumption (T-03-08).** This entity uses the
+ * `_migration_state` model name; user entities are forbidden from starting
+ * with `_` (enforced by the Phase 7 `validate` rule, VAL-07). ElectroDB's
+ * `__edb_e__` identity stamp provides defense-in-depth: even a colliding
+ * user record is filtered out by the framework's reads.
  */
 export const createMigrationStateEntity = (client: DynamoDBDocumentClient, table: string, options?: InternalEntityOptions) => {
   const pkField = options?.keyFields?.pk ?? DEFAULT_TABLE_KEYS.pk;
@@ -68,7 +80,7 @@ export const createMigrationStateEntity = (client: DynamoDBDocumentClient, table
         lockRunId: { type: 'string' },
         lockAcquiredAt: { type: 'string' },
         lockState: {
-          type: ['free', 'apply', 'finalize', 'rollback', 'release', 'failed'] as const,
+          type: ['free', 'apply', 'finalize', 'rollback', 'release', 'failed', 'dying'] as const,
           required: true,
         },
         lockMigrationId: { type: 'string' },
