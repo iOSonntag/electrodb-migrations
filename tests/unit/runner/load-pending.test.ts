@@ -88,6 +88,29 @@ function makeMigObj(id: string, entityName: string, fromVersion: string, toVersi
   } as any;
 }
 
+/**
+ * Build Dirent-like objects for `readdir({ withFileTypes: true })` mocks.
+ * `loadPendingMigrations` (WR-02) filters out non-directory entries before
+ * constructing migration paths, so test mocks must return objects with a
+ * working `isDirectory()` method.
+ */
+function makeDirents(names: string[], opts: { isDirectory?: boolean } = {}): import('node:fs').Dirent[] {
+  const isDir = opts.isDirectory ?? true;
+  return names.map((name) => ({
+    name,
+    isDirectory: () => isDir,
+    isFile: () => !isDir,
+    isBlockDevice: () => false,
+    isCharacterDevice: () => false,
+    isFIFO: () => false,
+    isSocket: () => false,
+    isSymbolicLink: () => false,
+    parentPath: '',
+    path: '',
+  // biome-ignore lint/suspicious/noExplicitAny: minimal Dirent stub for vitest mocks
+  } as any));
+}
+
 // ---------------------------------------------------------------------------
 // LM: loadMigrationFile tests (real jiti, importActual)
 // ---------------------------------------------------------------------------
@@ -171,7 +194,7 @@ describe('loadPendingMigrations', () => {
 
   it('LP-2: two disk migrations, zero _migrations rows → both pending sorted by (entityName, fromVersion)', async () => {
     const { readdir } = await import('node:fs/promises');
-    vi.mocked(readdir).mockResolvedValue(['User-add-status', 'User-add-tier'] as unknown as Awaited<ReturnType<typeof readdir>>);
+    vi.mocked(readdir).mockResolvedValue(makeDirents(['User-add-status', 'User-add-tier']) as unknown as Awaited<ReturnType<typeof readdir>>);
 
     vi.mocked(loadMigrationFile)
       .mockResolvedValueOnce(makeMigObj('20260601000000-User-add-status', 'User', '1', '2'))
@@ -191,7 +214,7 @@ describe('loadPendingMigrations', () => {
 
   it('LP-3: applied _migrations row for User-add-status → only User-add-tier pending', async () => {
     const { readdir } = await import('node:fs/promises');
-    vi.mocked(readdir).mockResolvedValue(['User-add-status', 'User-add-tier'] as unknown as Awaited<ReturnType<typeof readdir>>);
+    vi.mocked(readdir).mockResolvedValue(makeDirents(['User-add-status', 'User-add-tier']) as unknown as Awaited<ReturnType<typeof readdir>>);
 
     vi.mocked(loadMigrationFile)
       .mockResolvedValueOnce(makeMigObj('20260601000000-User-add-status', 'User', '1', '2'))
@@ -211,7 +234,7 @@ describe('loadPendingMigrations', () => {
   it('LP-4: 4 cross-entity migrations, 0 rows → sorted by (entityName, fromVersion) ascending', async () => {
     const { readdir } = await import('node:fs/promises');
     // Directory order is intentionally mixed to verify sort correctness.
-    vi.mocked(readdir).mockResolvedValue(['User-v1', 'User-v2', 'Team-v1', 'Team-v2'] as unknown as Awaited<ReturnType<typeof readdir>>);
+    vi.mocked(readdir).mockResolvedValue(makeDirents(['User-v1', 'User-v2', 'Team-v1', 'Team-v2']) as unknown as Awaited<ReturnType<typeof readdir>>);
 
     vi.mocked(loadMigrationFile)
       .mockResolvedValueOnce(makeMigObj('User-v1', 'User', '1', '2'))
@@ -238,7 +261,7 @@ describe('loadPendingMigrations', () => {
 
   it('LP-5: failed migration row is NOT pending (requires rollback first)', async () => {
     const { readdir } = await import('node:fs/promises');
-    vi.mocked(readdir).mockResolvedValue(['User-add-status'] as unknown as Awaited<ReturnType<typeof readdir>>);
+    vi.mocked(readdir).mockResolvedValue(makeDirents(['User-add-status']) as unknown as Awaited<ReturnType<typeof readdir>>);
 
     vi.mocked(loadMigrationFile).mockResolvedValueOnce(
       makeMigObj('20260601000000-User-add-status', 'User', '1', '2'),
