@@ -10,9 +10,12 @@ import { buildProgram } from './program.js';
  * Phase 2 ships the program with the global `--config` flag only. Plan 08
  * (init / baseline) and Plan 09 (create) each export a `registerXxxCommand`
  * function that this entry lazy-imports below — keeping Plan 05 free of any
- * downstream-plan import (FND-06 hygiene). Plan 09 will replace the
- * `.catch(...)` block with a non-catching `await` once the three command
- * modules ship.
+ * downstream-plan import (FND-06 hygiene).
+ *
+ * Phase 4 (Plan 12 + 13) adds the five runner-adjacent commands: apply,
+ * release, finalize, status, history. All eight are lazy-imported here in
+ * a single Promise.all — startup cost is bounded to the time of the slowest
+ * import (sub-millisecond; none of the eight command files pull ts-morph).
  */
 type Registrar = (program: import('commander').Command) => void;
 type CommandModule<K extends string> = Record<K, Registrar>;
@@ -35,19 +38,35 @@ async function tryImportRegistrar<K extends string>(modulePath: string, exportNa
 }
 
 async function main(): Promise<void> {
-  const [registerInit, registerBaseline, registerCreate] = await Promise.all([
+  const [
+    registerInit,
+    registerBaseline,
+    registerCreate,
+    registerApply,
+    registerRelease,
+    registerFinalize,
+    registerStatus,
+    registerHistory,
+  ] = await Promise.all([
     tryImportRegistrar('./commands/init.js', 'registerInitCommand'),
     tryImportRegistrar('./commands/baseline.js', 'registerBaselineCommand'),
     tryImportRegistrar('./commands/create.js', 'registerCreateCommand'),
+    tryImportRegistrar('./commands/apply.js', 'registerApplyCommand'),
+    tryImportRegistrar('./commands/release.js', 'registerReleaseCommand'),
+    tryImportRegistrar('./commands/finalize.js', 'registerFinalizeCommand'),
+    tryImportRegistrar('./commands/status.js', 'registerStatusCommand'),
+    tryImportRegistrar('./commands/history.js', 'registerHistoryCommand'),
   ]);
 
-  // Plans 08 + 09 wire these in; until then the program still parses
-  // --version / --help so `node dist/cli/index.js --version` smoke-tests
-  // green for FND-04.
   const program = buildProgram({
     ...(registerInit ? { registerInit } : {}),
     ...(registerBaseline ? { registerBaseline } : {}),
     ...(registerCreate ? { registerCreate } : {}),
+    ...(registerApply ? { registerApply } : {}),
+    ...(registerRelease ? { registerRelease } : {}),
+    ...(registerFinalize ? { registerFinalize } : {}),
+    ...(registerStatus ? { registerStatus } : {}),
+    ...(registerHistory ? { registerHistory } : {}),
   });
 
   await program.parseAsync(process.argv);
