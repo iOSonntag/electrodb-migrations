@@ -5,7 +5,9 @@ import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { wrapClient } from '../guard/index.js';
 import { readLockRow } from '../lock/index.js';
 import { createMigrationsService } from '../internal-entities/index.js';
-import { applyBatch, finalizeFlow, loadPendingMigrations, type HistoryRow, type RawHistoryRow, type ItemCounts } from '../runner/index.js';
+import { applyBatch, finalizeFlow, loadPendingMigrations, type HistoryRow, type PendingMigration, type RawHistoryRow, type ItemCounts } from '../runner/index.js';
+import type { AnyElectroEntity, Migration } from '../migrations/index.js';
+import type { ResolvedConfig } from '../config/index.js';
 import { clear } from '../state-mutations/index.js';
 import type { CreateMigrationsClientArgs, MigrationsClient } from './types.js';
 
@@ -35,10 +37,58 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
   // `DynamoDBDocumentClient` is also an instance of `DynamoDBClient`, but the user
   // intending a DocumentClient will pass it directly. Use an explicit check on
   // `DynamoDBDocumentClient` to avoid wrapping an already-wrapped client.
-  const docClient =
+  //
+  // ISOLATION INVARIANT — guard middleware must NEVER intercept runner/bundle operations.
+  //
+  // `wrapClient` mutates the client's `middlewareStack` in place. In AWS SDK v3,
+  // `DynamoDBDocumentClient` shares the SAME `middlewareStack` object as the underlying
+  // raw `DynamoDBClient` (verified: `DynamoDBDocumentClient.from(raw).middlewareStack === raw.middlewareStack`).
+  // Adding guard middleware to any `DynamoDBDocumentClient` ALSO adds it to the underlying
+  // raw client's stack, which means ALL subsequent commands on that raw client — including
+  // the runner bundle's internal scans, patches, and deletes — would also be intercepted.
+  // This creates a fail-closed loop: `resolvePendingMigrations` scans `_migrations`, the
+  // guard intercepts that scan, tries to read the lock row, and the whole thing deadlocks.
+  //
+  // Solution: build the internal bundle from a FRESH `DynamoDBClient` constructed from
+  // the existing client's `config` object. `new DynamoDBClient(existingConfig)` creates
+  // a new instance with an independent `middlewareStack` that is not shared with `args.client`.
+  // The guarded path wraps `args.client` (or a fresh doc client from it) directly.
+  const userDocClient =
     args.client instanceof DynamoDBDocumentClient
       ? args.client
       : DynamoDBDocumentClient.from(args.client as DynamoDBClient);
+
+  // ISOLATION: Two separate middleware stacks — one for the internal bundle, one for the guard.
+  //
+  // `DynamoDBDocumentClient` shares the same `middlewareStack` object as the underlying
+  // raw `DynamoDBClient`. When `wrapClient` mutates a client's `middlewareStack` in place
+  // (adding the guard middleware), that mutation propagates to ALL other `DynamoDBDocumentClient`
+  // instances and the raw `DynamoDBClient` that share the same stack — including the test's
+  // `setup.raw` used for table lifecycle operations. Cleanup calls (DeleteTable) would then
+  // be blocked by the guard when the lock is in a gating state.
+  //
+  // Solution:
+  //   1. For the BUNDLE (internal): clone the middlewareStack so the bundle uses a copy
+  //      that is not shared with the user's client. The guard will never affect it.
+  //   2. For the GUARD (user-facing): also clone the stack, add the guard, and use this
+  //      as the guarded client. The original user-supplied client (`args.client`) is
+  //      NOT mutated — its stack is unchanged.
+  //
+  // `middlewareStack.clone()` is a smithy-client internal (not in TS types) that returns
+  // a new stack object with the same handlers.
+  type CloneableStack = { clone: () => typeof userDocClient.middlewareStack };
+
+  // Bundle client: uses a cloned stack (pre-guard snapshot).
+  const bundleDocClient = DynamoDBDocumentClient.from(userDocClient);
+  // biome-ignore lint/suspicious/noExplicitAny: middlewareStack.clone() is a smithy internal not exposed in TS types.
+  bundleDocClient.middlewareStack = (userDocClient.middlewareStack as unknown as CloneableStack).clone();
+  const docClient = bundleDocClient;
+
+  // Guard client: a separate DocumentClient instance with its OWN cloned stack.
+  // Wrapping this instance does NOT affect userDocClient or bundleDocClient.
+  const guardedDocClient = DynamoDBDocumentClient.from(userDocClient);
+  // biome-ignore lint/suspicious/noExplicitAny: middlewareStack.clone() is a smithy internal not exposed in TS types.
+  guardedDocClient.middlewareStack = (userDocClient.middlewareStack as unknown as CloneableStack).clone();
 
   // Step 3: build internal-entity bundle for the runner.
   const { electroEntity, electroVersion } = args.config.keyNames;
@@ -60,11 +110,11 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
   const cwd = args.cwd ?? process.cwd();
 
   // Step 4: build the guarded client for the user's app-time DDB calls.
-  // The guarded client uses the SAME underlying docClient but adds middleware
-  // that blocks writes (or all ops) when a migration lock is active.
-  // The runner uses the UNGUARDED `docClient` via `bundle`.
+  // Wraps `guardedDocClient` (a cloned-stack instance) so the guard middleware is
+  // ONLY on this instance. `userDocClient`, `docClient`, and `setup.raw` are all
+  // unaffected by this wrap operation.
   const guarded = wrapClient({
-    client: docClient,
+    client: guardedDocClient,
     config: args.config,
     internalService: bundle,
   }) as DynamoDBDocumentClient;
@@ -72,7 +122,7 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
   const client: MigrationsClient = {
     async apply(callArgs) {
       const runId = randomUUID();
-      const pending = await loadPendingMigrations({ config: args.config, service: bundle, cwd });
+      const pending = await resolvePendingMigrations(args.migrations, { config: args.config, service: bundle, cwd });
       const result = await applyBatch({
         service: bundle,
         config: args.config,
@@ -89,9 +139,17 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
     async finalize(arg) {
       if (typeof arg === 'string') {
         const runId = randomUUID();
-        const pending = await loadPendingMigrations({ config: args.config, service: bundle, cwd });
-        const target = pending.find((p) => p.id === arg);
-        if (!target) {
+        // When pre-loaded migrations are provided, look up by id across ALL of them
+        // (not just pending ones) — finalize targets applied migrations.
+        // When not pre-loaded, resolve from disk (pending list covers newly-applied ones).
+        let migrationObj: Migration<AnyElectroEntity, AnyElectroEntity> | undefined;
+        if (args.migrations) {
+          migrationObj = args.migrations.find((m) => m.id === arg);
+        } else {
+          const pending = await resolvePendingMigrations(undefined, { config: args.config, service: bundle, cwd });
+          migrationObj = pending.find((p) => p.id === arg)?.migration;
+        }
+        if (!migrationObj) {
           throw new Error(`Migration '${arg}' not found in ${args.config.migrations}.`);
         }
         const result = await finalizeFlow({
@@ -99,7 +157,7 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
           config: args.config,
           client: docClient,
           tableName,
-          migration: target.migration,
+          migration: migrationObj,
           runId,
           holder,
         });
@@ -110,17 +168,26 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
       const all = (await bundle.migrations.scan.go({ pages: 'all' })) as { data: Array<{ id: string; status: string }> };
       const appliedRows = all.data.filter((r) => r.status === 'applied');
       const finalized: { migId: string; itemCounts: ItemCounts }[] = [];
+      // Build a lookup of all available migrations (preloaded or from disk).
+      const allAvailable = args.migrations
+        ? new Map(args.migrations.map((m) => [m.id, m]))
+        : null;
       for (const row of appliedRows) {
         const runId = randomUUID();
-        const pending = await loadPendingMigrations({ config: args.config, service: bundle, cwd });
-        const target = pending.find((p) => p.id === row.id);
-        if (!target) continue; // disk migration not found — skip (operator alert)
+        let migrationObj: Migration<AnyElectroEntity, AnyElectroEntity> | undefined;
+        if (allAvailable) {
+          migrationObj = allAvailable.get(row.id);
+        } else {
+          const pendingList = await resolvePendingMigrations(undefined, { config: args.config, service: bundle, cwd });
+          migrationObj = pendingList.find((p) => p.id === row.id)?.migration;
+        }
+        if (!migrationObj) continue; // migration not found — skip (operator alert)
         const result = await finalizeFlow({
           service: bundle,
           config: args.config,
           client: docClient,
           tableName,
-          migration: target.migration,
+          migration: migrationObj,
           runId,
           holder,
         });
@@ -179,6 +246,58 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
   };
 
   return client;
+}
+
+/**
+ * Resolve the pending migrations list.
+ *
+ * When `preloaded` is provided (the `migrations` array from `CreateMigrationsClientArgs`),
+ * skip disk discovery and build the `PendingMigration[]` directly from the array by
+ * correlating against `_migrations` rows (same pending-filter logic as `loadPendingMigrations`).
+ * This supports integration tests and Lambda bundlers where disk discovery is unavailable.
+ *
+ * When `preloaded` is absent, delegates to `loadPendingMigrations` (disk walk).
+ */
+async function resolvePendingMigrations(
+  preloaded: ReadonlyArray<Migration<AnyElectroEntity, AnyElectroEntity>> | undefined,
+  args: { config: ResolvedConfig; service: ReturnType<typeof createMigrationsService>; cwd: string },
+): Promise<PendingMigration[]> {
+  if (!preloaded || preloaded.length === 0) {
+    return loadPendingMigrations(args);
+  }
+
+  // Build PendingMigration objects from the pre-loaded array.
+  const onDisk: PendingMigration[] = preloaded.map((mig) => {
+    const fromVersion = (mig.from as unknown as { model: { version: string } }).model.version;
+    const toVersion = (mig.to as unknown as { model: { version: string } }).model.version;
+    return {
+      id: mig.id,
+      entityName: mig.entityName,
+      fromVersion,
+      toVersion,
+      migration: mig,
+      path: `(preloaded):${mig.id}`,
+    };
+  });
+
+  // Correlate against _migrations rows (same filter as loadPendingMigrations).
+  const scanResult = (await args.service.migrations.scan.go({ pages: 'all' })) as {
+    data: Array<{ id: string; status: string }>;
+  };
+  const byId = new Map<string, { status: string }>(scanResult.data.map((r) => [r.id, r]));
+
+  const pending = onDisk.filter((m) => {
+    const row = byId.get(m.id);
+    return !row || row.status === 'pending';
+  });
+
+  // Sort ascending by (entityName alphabetic, fromVersion numeric) — same as loadPendingMigrations.
+  pending.sort((a, b) => {
+    if (a.entityName !== b.entityName) return a.entityName < b.entityName ? -1 : 1;
+    return Number.parseInt(a.fromVersion, 10) - Number.parseInt(b.fromVersion, 10);
+  });
+
+  return pending;
 }
 
 /**

@@ -146,9 +146,12 @@ describe('PS-4 — createMigrationsClient smoke', () => {
       runner: { concurrency: 1 },
     };
 
+    // clone() is required by createMigrationsClient for guard middleware isolation.
+    interface FakeStack { add: () => void; remove: () => void; use: () => void; clone: () => FakeStack }
+    const makeStack = (): FakeStack => ({ add: () => {}, remove: () => {}, use: () => {}, clone: () => makeStack() });
     const fakeClient = {
       send: async () => ({}),
-      middlewareStack: { add: () => {}, remove: () => {}, use: () => {} },
+      middlewareStack: makeStack(),
       config: {},
     } as unknown as import('@aws-sdk/lib-dynamodb').DynamoDBDocumentClient;
 

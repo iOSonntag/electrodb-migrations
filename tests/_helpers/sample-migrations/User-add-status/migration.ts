@@ -40,3 +40,33 @@ export const createUserAddStatusMigration = (client: DynamoDBDocumentClient, tab
       status: 'active',
     }),
   });
+
+/**
+ * Test helper — wraps `createUserAddStatusMigration` with a synthetic up()
+ * that throws on a target record id. Used by RUN-08 fail-fast integration
+ * tests to pin the runner's failure semantics.
+ *
+ * JSDoc note: Used by tests/integration/runner/apply-failure-fail-fast.test.ts.
+ * Production code MUST NOT import this — it is intentionally a runtime-failing
+ * migration. The synthetic throw is the entire point of the test.
+ *
+ * @param client   - DynamoDB DocumentClient (from `@aws-sdk/lib-dynamodb`).
+ * @param table    - Target DynamoDB table name.
+ * @param failOnId - The `id` field value that triggers a synthetic throw.
+ * @returns A `Migration<UserV1, UserV2>` whose `up()` throws on `failOnId`.
+ */
+export const createUserAddStatusMigration_failOn = (
+  client: DynamoDBDocumentClient,
+  table: string,
+  failOnId: string,
+) => {
+  const base = createUserAddStatusMigration(client, table);
+  return {
+    ...base,
+    up: async (record: unknown) => {
+      const r = record as { id: string };
+      if (r.id === failOnId) throw new Error(`Synthetic failure on ${failOnId}`);
+      return { ...(record as Record<string, unknown>), status: 'active' };
+    },
+  };
+};
