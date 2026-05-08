@@ -62,7 +62,7 @@ describe('runFinalize (FIN-01/02/03/04)', () => {
     resolveCliConfig.mockResolvedValue({ config: makeResolvedConfig(), configPath: '/project/electrodb-migrations.config.ts', cwd: '/project' });
 
     const finalizeMock = vi.fn().mockResolvedValue({
-      finalized: [{ migId: 'mig-1', itemCounts: { scanned: 100, migrated: 100, skipped: 0, failed: 0 } }],
+      finalized: [{ migId: 'mig-1', itemCounts: { scanned: 100, migrated: 0, deleted: 100, skipped: 0, failed: 0 } }],
     });
     createMigrationsClient.mockReturnValue({ finalize: finalizeMock } as never);
 
@@ -85,8 +85,8 @@ describe('runFinalize (FIN-01/02/03/04)', () => {
 
     const finalizeMock = vi.fn().mockResolvedValue({
       finalized: [
-        { migId: 'm1', itemCounts: { scanned: 50, migrated: 50, skipped: 0, failed: 0 } },
-        { migId: 'm2', itemCounts: { scanned: 80, migrated: 75, skipped: 5, failed: 0 } },
+        { migId: 'm1', itemCounts: { scanned: 50, migrated: 0, deleted: 50, skipped: 0, failed: 0 } },
+        { migId: 'm2', itemCounts: { scanned: 80, migrated: 0, deleted: 75, skipped: 5, failed: 0 } },
       ],
     });
     createMigrationsClient.mockReturnValue({ finalize: finalizeMock } as never);

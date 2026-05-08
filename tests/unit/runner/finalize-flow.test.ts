@@ -21,6 +21,16 @@ vi.mock('../../../src/state-mutations/index.js', () => ({
   clear: vi.fn().mockResolvedValue(undefined),
   clearFinalizeMode: vi.fn().mockResolvedValue(undefined),
   markFailed: vi.fn().mockResolvedValue(undefined),
+  // finalizeFlow now imports the canonical isConditionalCheckFailed helper
+  // from state-mutations rather than redefining it locally (WR-03).
+  isConditionalCheckFailed: (err: unknown): boolean => {
+    if (typeof err !== 'object' || err === null) return false;
+    const name = (err as { name?: unknown }).name;
+    const message = (err as { message?: unknown }).message;
+    if (typeof name === 'string' && name === 'ConditionalCheckFailedException') return true;
+    if (typeof message === 'string' && message.includes('ConditionalCheckFailedException')) return true;
+    return false;
+  },
 }));
 
 vi.mock('../../../src/runner/sleep.js', () => ({
@@ -174,7 +184,7 @@ describe('FF-3: empty scan', () => {
       holder: 'host',
     });
 
-    expect(result.itemCounts).toEqual({ scanned: 0, migrated: 0, skipped: 0, failed: 0 });
+    expect(result.itemCounts).toEqual({ scanned: 0, migrated: 0, deleted: 0, skipped: 0, failed: 0 });
     expect(vi.mocked(clearFinalizeMode)).toHaveBeenCalledOnce();
     expect(vi.mocked(markFailed)).not.toHaveBeenCalled();
   });
@@ -208,7 +218,7 @@ describe('FF-4: Pitfall 7 — concurrent app delete', () => {
       holder: 'host',
     });
 
-    expect(result.itemCounts).toEqual({ scanned: 2, migrated: 1, skipped: 1, failed: 0 });
+    expect(result.itemCounts).toEqual({ scanned: 2, migrated: 0, deleted: 1, skipped: 1, failed: 0 });
     expect(vi.mocked(clearFinalizeMode)).toHaveBeenCalledOnce();
     expect(vi.mocked(markFailed)).not.toHaveBeenCalled();
   });

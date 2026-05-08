@@ -99,8 +99,8 @@ function makeArgs(overrides: Partial<ApplyBatchArgs> = {}): ApplyBatchArgs {
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
-  vi.mocked(applyFlow).mockResolvedValue({ itemCounts: { scanned: 0, migrated: 0, skipped: 0, failed: 0 } });
-  vi.mocked(applyFlowScanWrite).mockResolvedValue({ itemCounts: { scanned: 0, migrated: 0, skipped: 0, failed: 0 } });
+  vi.mocked(applyFlow).mockResolvedValue({ itemCounts: { scanned: 0, migrated: 0, deleted: 0, skipped: 0, failed: 0 } });
+  vi.mocked(applyFlowScanWrite).mockResolvedValue({ itemCounts: { scanned: 0, migrated: 0, deleted: 0, skipped: 0, failed: 0 } });
   vi.mocked(transitionReleaseToApply).mockResolvedValue(undefined);
   vi.mocked(appendInFlight).mockResolvedValue(undefined);
   vi.mocked(markFailed).mockResolvedValue(undefined);

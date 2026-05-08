@@ -184,7 +184,7 @@ beforeEach(() => {
   createMigrationsService.mockReturnValue(stubBundle as unknown as ReturnType<typeof internalEntitiesModule.createMigrationsService>);
   loadPendingMigrations.mockResolvedValue([]);
   applyBatch.mockResolvedValue({ applied: [] });
-  finalizeFlow.mockResolvedValue({ itemCounts: { scanned: 0, migrated: 0, skipped: 0, failed: 0 } });
+  finalizeFlow.mockResolvedValue({ itemCounts: { scanned: 0, migrated: 0, deleted: 0, skipped: 0, failed: 0 } });
   readLockRow.mockResolvedValue(null);
   clear.mockResolvedValue(undefined);
 });
@@ -290,7 +290,7 @@ describe('CMC-4 — apply() dispatch', () => {
       { id: 'mig-1', entityName: 'User', fromVersion: '1', toVersion: '2', migration: {} as never, path: '' },
     ];
     loadPendingMigrations.mockResolvedValue(pending);
-    applyBatch.mockResolvedValue({ applied: [{ migId: 'mig-1', itemCounts: { scanned: 5, migrated: 5, skipped: 0, failed: 0 } }] });
+    applyBatch.mockResolvedValue({ applied: [{ migId: 'mig-1', itemCounts: { scanned: 5, migrated: 5, deleted: 0, skipped: 0, failed: 0 } }] });
 
     const client = createMigrationsClient(makeClientArgs());
     const result = await client.apply();
@@ -344,7 +344,7 @@ describe('CMC-6 — finalize() dispatch', () => {
   it('finds migration by id from loadPendingMigrations and calls finalizeFlow', async () => {
     const fakeMig = { id: 'mig-1', entityName: 'User', fromVersion: '1', toVersion: '2', migration: { id: 'mig-1' } as never, path: '' };
     loadPendingMigrations.mockResolvedValue([fakeMig]);
-    finalizeFlow.mockResolvedValue({ itemCounts: { scanned: 10, migrated: 10, skipped: 0, failed: 0 } });
+    finalizeFlow.mockResolvedValue({ itemCounts: { scanned: 10, migrated: 0, deleted: 10, skipped: 0, failed: 0 } });
 
     const client = createMigrationsClient(makeClientArgs());
     const result = await client.finalize('mig-1');
@@ -352,7 +352,7 @@ describe('CMC-6 — finalize() dispatch', () => {
     expect(finalizeFlow).toHaveBeenCalledTimes(1);
     expect(result.finalized).toHaveLength(1);
     expect(result.finalized[0]!.migId).toBe('mig-1');
-    expect(result.finalized[0]!.itemCounts.migrated).toBe(10);
+    expect(result.finalized[0]!.itemCounts.deleted).toBe(10);
   });
 
   it('throws when migration id not found in pending list', async () => {
@@ -376,7 +376,7 @@ describe('CMC-6 — finalize() dispatch', () => {
       { id: 'mig-2', entityName: 'User', fromVersion: '2', toVersion: '3', migration: { id: 'mig-2' } as never, path: '' },
     ];
     loadPendingMigrations.mockResolvedValue(pending);
-    finalizeFlow.mockResolvedValue({ itemCounts: { scanned: 5, migrated: 5, skipped: 0, failed: 0 } });
+    finalizeFlow.mockResolvedValue({ itemCounts: { scanned: 5, migrated: 0, deleted: 5, skipped: 0, failed: 0 } });
 
     const client = createMigrationsClient(makeClientArgs());
     const result = await client.finalize({ all: true });

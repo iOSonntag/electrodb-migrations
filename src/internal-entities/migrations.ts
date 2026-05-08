@@ -68,6 +68,12 @@ export const createMigrationsEntity = (client: DynamoDBDocumentClient, table: st
             migrated: { type: 'number' },
             skipped: { type: 'number' },
             failed: { type: 'number' },
+            // `deleted` is finalize-only (number of v1 records reaped after a
+            // successful apply). Apply rows leave it absent; finalize rows leave
+            // `migrated` at 0 and use `deleted` for the reap count. Keeping the
+            // two slots distinct avoids consumers of `history --json` reading
+            // a delete count as an apply-time `migrated` total.
+            deleted: { type: 'number' },
           },
         },
         error: {

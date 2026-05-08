@@ -55,7 +55,7 @@ export async function runHistory(args: RunHistoryArgs): Promise<void> {
   const sorted = [...rows].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   const table = createTable({
-    head: ['id', 'entityName', 'from→to', 'status', 'appliedAt', 'finalizedAt', 'scanned/migrated/skipped/failed'],
+    head: ['id', 'entityName', 'from→to', 'status', 'appliedAt', 'finalizedAt', 'scanned/migrated/deleted/skipped/failed'],
     rows: sorted.map((r) => [
       r.id,
       r.entityName,
@@ -64,7 +64,7 @@ export async function runHistory(args: RunHistoryArgs): Promise<void> {
       r.appliedAt ?? '—',
       r.finalizedAt ?? '—',
       r.itemCounts
-        ? `${r.itemCounts.scanned}/${r.itemCounts.migrated}/${r.itemCounts.skipped}/${r.itemCounts.failed}`
+        ? `${r.itemCounts.scanned}/${r.itemCounts.migrated}/${r.itemCounts.deleted ?? 0}/${r.itemCounts.skipped}/${r.itemCounts.failed}`
         : '—',
     ]),
   });

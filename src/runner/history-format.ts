@@ -27,7 +27,7 @@ export interface HistoryRow {
   toVersion: string;
   entityName: string;
   fingerprint: string;
-  itemCounts?: { scanned: number; migrated: number; skipped: number; failed: number };
+  itemCounts?: { scanned: number; migrated: number; deleted?: number; skipped: number; failed: number };
   error?: { code?: string; message?: string; details?: string };
   reads?: ReadonlyArray<string>;
   rollbackStrategy?: 'projected' | 'snapshot' | 'fill-only' | 'custom';

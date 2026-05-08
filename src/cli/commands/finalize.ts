@@ -62,8 +62,7 @@ export async function runFinalize(args: RunFinalizeArgs): Promise<void> {
   }
   spinner.success(c.ok(`Finalized ${result.finalized.length} migration${result.finalized.length === 1 ? '' : 's'}.`));
   for (const f of result.finalized) {
-    log.info(`  • ${f.migId}: ${f.itemCounts.scanned} scanned, ${f.itemCounts.migrated} deleted, ${f.itemCounts.skipped} skipped, ${f.itemCounts.failed} failed`);
-    // Note: count-audit's "migrated" slot is reused for "deleted" in finalize; see Plan 04-10 disposition.
+    log.info(`  • ${f.migId}: ${f.itemCounts.scanned} scanned, ${f.itemCounts.deleted} deleted, ${f.itemCounts.skipped} skipped, ${f.itemCounts.failed} failed`);
   }
 }
 

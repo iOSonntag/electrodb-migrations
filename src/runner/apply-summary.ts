@@ -16,7 +16,7 @@ export interface MigrationSummaryEntry {
   entityName: string;
   fromVersion: string;
   toVersion: string;
-  itemCounts: { scanned: number; migrated: number; skipped: number; failed: number };
+  itemCounts: { scanned: number; migrated: number; deleted?: number; skipped: number; failed: number };
 }
 
 export interface ApplySummaryArgs {

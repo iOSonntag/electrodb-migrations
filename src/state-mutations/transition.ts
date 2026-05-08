@@ -18,6 +18,7 @@ export interface TransitionArgs {
   itemCounts?: {
     scanned: number;
     migrated: number;
+    deleted?: number;
     skipped: number;
     failed: number;
   };

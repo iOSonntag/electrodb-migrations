@@ -4,7 +4,7 @@ import { createCountAudit } from '../../../src/runner/count-audit.js';
 describe('createCountAudit (RUN-04 count-audit invariant)', () => {
   it('1. fresh accumulator returns all-zero snapshot', () => {
     const audit = createCountAudit();
-    expect(audit.snapshot()).toEqual({ scanned: 0, migrated: 0, skipped: 0, failed: 0 });
+    expect(audit.snapshot()).toEqual({ scanned: 0, migrated: 0, deleted: 0, skipped: 0, failed: 0 });
   });
 
   it('2. increment paths each step their counter by 1; addMigrated(n) adds n; addMigrated(0) is a no-op', () => {
@@ -14,10 +14,10 @@ describe('createCountAudit (RUN-04 count-audit invariant)', () => {
     audit.incrementFailed();
     audit.addMigrated(5);
     audit.addMigrated(0);
-    expect(audit.snapshot()).toEqual({ scanned: 1, migrated: 5, skipped: 1, failed: 1 });
+    expect(audit.snapshot()).toEqual({ scanned: 1, migrated: 5, deleted: 0, skipped: 1, failed: 1 });
   });
 
-  it('3. assertInvariant does NOT throw on success path (scanned == migrated + skipped)', () => {
+  it('3. assertInvariant does NOT throw on success path (scanned == migrated + deleted + skipped)', () => {
     const audit = createCountAudit();
     // scanned=10, migrated=8 (two addMigrated calls), skipped=2, failed=0
     for (let i = 0; i < 10; i++) audit.incrementScanned();
@@ -25,7 +25,17 @@ describe('createCountAudit (RUN-04 count-audit invariant)', () => {
     audit.addMigrated(5);
     for (let i = 0; i < 2; i++) audit.incrementSkipped();
     expect(() => audit.assertInvariant()).not.toThrow();
-    expect(audit.snapshot()).toEqual({ scanned: 10, migrated: 8, skipped: 2, failed: 0 });
+    expect(audit.snapshot()).toEqual({ scanned: 10, migrated: 8, deleted: 0, skipped: 2, failed: 0 });
+  });
+
+  it('3b. assertInvariant does NOT throw on finalize path (scanned == deleted + skipped)', () => {
+    const audit = createCountAudit();
+    // scanned=10, migrated=0, deleted=8, skipped=2, failed=0 — finalize uses `deleted`
+    for (let i = 0; i < 10; i++) audit.incrementScanned();
+    audit.addDeleted(8);
+    for (let i = 0; i < 2; i++) audit.incrementSkipped();
+    expect(() => audit.assertInvariant()).not.toThrow();
+    expect(audit.snapshot()).toEqual({ scanned: 10, migrated: 0, deleted: 8, skipped: 2, failed: 0 });
   });
 
   it('4. assertInvariant does NOT throw on fail-fast path (scanned == migrated + skipped + 1)', () => {
@@ -36,7 +46,7 @@ describe('createCountAudit (RUN-04 count-audit invariant)', () => {
     audit.incrementSkipped();
     audit.incrementFailed();
     expect(() => audit.assertInvariant()).not.toThrow();
-    expect(audit.snapshot()).toEqual({ scanned: 5, migrated: 3, skipped: 1, failed: 1 });
+    expect(audit.snapshot()).toEqual({ scanned: 5, migrated: 3, deleted: 0, skipped: 1, failed: 1 });
   });
 
   it('5. assertInvariant throws on over-count with exact triple and RUN-04 in message', () => {
@@ -44,7 +54,7 @@ describe('createCountAudit (RUN-04 count-audit invariant)', () => {
     // scanned=10, migrated=11, skipped=0, failed=0 — over-count
     for (let i = 0; i < 10; i++) audit.incrementScanned();
     audit.addMigrated(11);
-    expect(() => audit.assertInvariant()).toThrow(/scanned=10 != migrated=11 \+ skipped=0 \+ failed=0/);
+    expect(() => audit.assertInvariant()).toThrow(/scanned=10 != migrated=11 \+ deleted=0 \+ skipped=0 \+ failed=0/);
     expect(() => audit.assertInvariant()).toThrow(/RUN-04/);
   });
 
@@ -54,7 +64,7 @@ describe('createCountAudit (RUN-04 count-audit invariant)', () => {
     for (let i = 0; i < 10; i++) audit.incrementScanned();
     audit.addMigrated(8);
     audit.incrementSkipped();
-    expect(() => audit.assertInvariant()).toThrow(/scanned=10 != migrated=8 \+ skipped=1 \+ failed=0/);
+    expect(() => audit.assertInvariant()).toThrow(/scanned=10 != migrated=8 \+ deleted=0 \+ skipped=1 \+ failed=0/);
   });
 
   it('7. snapshot is independent: subsequent increments do NOT mutate the snapshot', () => {
@@ -66,12 +76,17 @@ describe('createCountAudit (RUN-04 count-audit invariant)', () => {
     audit.incrementScanned();
     audit.incrementSkipped();
     // snap must remain unchanged
-    expect(snap).toEqual({ scanned: 1, migrated: 1, skipped: 0, failed: 0 });
-    expect(audit.snapshot()).toEqual({ scanned: 2, migrated: 1, skipped: 1, failed: 0 });
+    expect(snap).toEqual({ scanned: 1, migrated: 1, deleted: 0, skipped: 0, failed: 0 });
+    expect(audit.snapshot()).toEqual({ scanned: 2, migrated: 1, deleted: 0, skipped: 1, failed: 0 });
   });
 
   it('8. addMigrated rejects negative values', () => {
     const audit = createCountAudit();
     expect(() => audit.addMigrated(-1)).toThrow();
+  });
+
+  it('9. addDeleted rejects negative values', () => {
+    const audit = createCountAudit();
+    expect(() => audit.addDeleted(-1)).toThrow();
   });
 });

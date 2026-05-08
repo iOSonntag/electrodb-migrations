@@ -32,8 +32,9 @@ export interface FinalizeFlowResult {
  * `skipped`, NOT `failed`. Post-loop: patch `_migrations.status='finalized'`
  * THEN `clear({runId})`. FIN-04: no auto-rollback hook fires.
  *
- * `audit.addMigrated` is reused as the "deleted" slot (option a over adding
- * a new `addDeleted` method — keeps count-audit zero-changes for finalize).
+ * Each successful v1 delete increments `audit.addDeleted(1)`. Apply-time
+ * `migrated` is left at 0 for finalize rows so consumers of `history --json`
+ * can distinguish apply-time writes from finalize-time reaps (WR-05).
  */
 export async function finalizeFlow(args: FinalizeFlowArgs): Promise<FinalizeFlowResult> {
   await acquireLock(args.service, args.config, {
@@ -69,7 +70,7 @@ export async function finalizeFlow(args: FinalizeFlowArgs): Promise<FinalizeFlow
           )
             .delete(v1)
             .go();
-          audit.addMigrated(1); // reused as "deleted" — see JSDoc (option a).
+          audit.addDeleted(1); // finalize-only counter; apply-time `migrated` stays 0.
         } catch (err) {
           if (isConditionalCheckFailed(err)) {
             // Pitfall 7 — concurrent app delete during finalize-mode (Decision A7).

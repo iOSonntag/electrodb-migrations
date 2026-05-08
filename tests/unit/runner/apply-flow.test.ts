@@ -242,7 +242,7 @@ describe('runner.applyFlow (RUN-01/02/04/08)', () => {
         runId: 'run-001',
         migId: 'test-migration-id',
         outcome: 'applied',
-        itemCounts: { scanned: 2, migrated: 1, skipped: 1, failed: 0 },
+        itemCounts: { scanned: 2, migrated: 1, deleted: 0, skipped: 1, failed: 0 },
       }),
     );
   });
