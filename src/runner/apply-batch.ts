@@ -66,7 +66,23 @@ export interface ApplyBatchResult {
  */
 export async function applyBatch(args: ApplyBatchArgs): Promise<ApplyBatchResult> {
   // RUN-07
-  if (args.pending.length === 0) return { applied: [] };
+  if (args.pending.length === 0) {
+    // If the operator explicitly targeted a migration, distinguish "nothing pending
+    // anywhere" (silent no-op) from "your target is not pending" (error). Without
+    // this, the CLI prints "No migrations to apply." and exits 0, leaving the
+    // operator under the false impression that the target was applied or already up
+    // to date — when in fact their explicit target was silently filtered out
+    // (already applied, finalized, failed, or unknown id).
+    if (args.migrationId !== undefined) {
+      const err: Error & { code?: string; remediation?: string } = new Error(
+        `Migration '${args.migrationId}' is not pending (already applied, finalized, failed, or unknown).`,
+      );
+      err.code = 'EDB_NOT_PENDING';
+      err.remediation = "Run `electrodb-migrations history` to inspect this migration's current status.";
+      throw err;
+    }
+    return { applied: [] };
+  }
 
   // RUN-06
   let toApply: ReadonlyArray<PendingMigration>;
