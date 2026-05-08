@@ -84,20 +84,51 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
   //      NOT mutated — its stack is unchanged.
   //
   // `middlewareStack.clone()` is a smithy-client internal (not in TS types) that returns
-  // a new stack object with the same handlers.
+  // a new stack object with the same handlers. This is the load-bearing isolation
+  // primitive for the runUnguarded bypass mechanism — if it ever disappears or its
+  // shape changes, the runner could re-gate itself on its own lock (T-04-11-03 regression).
   type CloneableStack = { clone: () => typeof userDocClient.middlewareStack };
+  const userStack = userDocClient.middlewareStack as unknown as Partial<CloneableStack>;
+  if (typeof userStack.clone !== 'function') {
+    // Fail closed with a precise diagnostic rather than producing a TypeError deep
+    // inside a guarded write later. If a future AWS SDK ever drops or renames
+    // `middlewareStack.clone`, surfacing this here gives operators an actionable
+    // signal: pin to a known-compatible @aws-sdk/client-dynamodb version.
+    throw new Error(
+      'createMigrationsClient: client.middlewareStack.clone is not available. ' +
+        'This is a smithy-client internal the framework relies on to keep the ' +
+        'runner bundle isolated from guard middleware. Pin @aws-sdk/client-dynamodb ' +
+        'to a version where middlewareStack.clone() exists, or open an issue.',
+    );
+  }
+  const cloneStack = (): typeof userDocClient.middlewareStack =>
+    (userDocClient.middlewareStack as unknown as CloneableStack).clone();
 
   // Bundle client: uses a cloned stack (pre-guard snapshot).
   const bundleDocClient = DynamoDBDocumentClient.from(userDocClient);
-  // biome-ignore lint/suspicious/noExplicitAny: middlewareStack.clone() is a smithy internal not exposed in TS types.
-  bundleDocClient.middlewareStack = (userDocClient.middlewareStack as unknown as CloneableStack).clone();
+  bundleDocClient.middlewareStack = cloneStack();
   const docClient = bundleDocClient;
 
   // Guard client: a separate DocumentClient instance with its OWN cloned stack.
   // Wrapping this instance does NOT affect userDocClient or bundleDocClient.
   const guardedDocClient = DynamoDBDocumentClient.from(userDocClient);
-  // biome-ignore lint/suspicious/noExplicitAny: middlewareStack.clone() is a smithy internal not exposed in TS types.
-  guardedDocClient.middlewareStack = (userDocClient.middlewareStack as unknown as CloneableStack).clone();
+  guardedDocClient.middlewareStack = cloneStack();
+
+  // Runtime isolation assertion: the three stacks must be three distinct objects.
+  // If `clone()` ever returns the same reference (or a shallow alias), guard
+  // middleware additions would propagate back into the bundle / user client and
+  // re-gate the runner on its own lock. Fail closed if the invariant breaks.
+  if (
+    bundleDocClient.middlewareStack === userDocClient.middlewareStack ||
+    guardedDocClient.middlewareStack === userDocClient.middlewareStack ||
+    bundleDocClient.middlewareStack === guardedDocClient.middlewareStack
+  ) {
+    throw new Error(
+      'createMigrationsClient: middlewareStack.clone() returned a non-independent stack. ' +
+        'The runner bundle, guard, and user clients must each have an isolated middleware ' +
+        'stack — a shared stack would cause the runner to gate itself on its own lock.',
+    );
+  }
 
   // Step 3: build internal-entity bundle for the runner.
   const { electroEntity, electroVersion } = args.config.keyNames;
