@@ -92,32 +92,11 @@ export async function applyFlow(args: ApplyFlowArgs): Promise<ApplyFlowResult> {
  * **`_migrations` row creation (Plan 08 prerequisite):**
  * `transitionToReleaseMode` patches the `_migrations` row (which must exist).
  * This function creates the row with `status: 'pending'` before scanning, so the
- * patch can succeed. The row is upserted (idempotent for repeated apply attempts).
+ * patch can succeed. The row is written via `.put()` (unconditional overwrite),
+ * which is idempotent across crash-and-retry: the row is rewritten to 'pending'
+ * each apply attempt and flipped to 'applied' by `transitionToReleaseMode`.
  */
 export async function applyFlowScanWrite(args: ApplyFlowArgs): Promise<ApplyFlowResult> {
-  // Create the `_migrations` row before scanning. `transitionToReleaseMode`'s
-  // transactWrite patches this row (item 1); it must exist. Status is `pending`
-  // here and flips to `applied` when the transition completes.
-  const from = args.migration.from as unknown as { model: { version: string } };
-  const to = args.migration.to as unknown as { model: { version: string } };
-  await args.service.migrations
-    .upsert({
-      id: args.migration.id,
-      schemaVersion: MIGRATIONS_SCHEMA_VERSION,
-      kind: 'transform',
-      status: 'pending',
-      entityName: args.migration.entityName,
-      fromVersion: from.model.version,
-      toVersion: to.model.version,
-      // fingerprint is set at `create`/`baseline` time; use a placeholder at apply
-      // time when no snapshot is available. Phase 7 validate enforces the fingerprint
-      // against the on-disk snapshot; apply does not re-derive it.
-      fingerprint: `applied:${args.migration.id}`,
-      hasDown: typeof args.migration.down === 'function',
-      hasRollbackResolver: typeof args.migration.rollbackResolver === 'function',
-    })
-    .go();
-
   const audit = createCountAudit();
 
   // Ensure the `_migrations` row exists BEFORE the TransactWrite in
