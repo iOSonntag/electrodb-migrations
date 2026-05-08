@@ -62,11 +62,7 @@ describe('source-scan invariants for src/lock/ + src/guard/ (LCK-07, GRD-02, Pit
   });
 
   it('no inline `consistent: true` under src/lock/ + src/guard/ — must use the named CONSISTENT_READ import (defense-in-depth)', async () => {
-    const inlineMatches = await scanFiles(
-      SCAN_GLOB,
-      (line) => /\bconsistent:\s*true\b/.test(line),
-      { stripComments: true },
-    );
+    const inlineMatches = await scanFiles(SCAN_GLOB, (line) => /\bconsistent:\s*true\b/.test(line), { stripComments: true });
     expect(inlineMatches).toEqual([]);
   });
 });

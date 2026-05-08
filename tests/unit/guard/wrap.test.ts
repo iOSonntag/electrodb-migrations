@@ -18,21 +18,25 @@ import { wrapClient } from '../../../src/guard/wrap.js';
 type NextHandler = (args: unknown) => Promise<unknown>;
 type Middleware = (next: NextHandler, context: { commandName?: string }) => NextHandler;
 
-interface CapturedRegistration {
-  middleware: Middleware | null;
-  options: { step?: string; name?: string } | null;
-}
-
 function makeFakeClient() {
-  const captured: CapturedRegistration = { middleware: null, options: null };
+  let capturedMiddleware: Middleware | null = null;
+  let capturedOptions: { step?: string; name?: string } | null = null;
   const add = vi.fn((mw: Middleware, opts: { step?: string; name?: string }) => {
-    captured.middleware = mw;
-    captured.options = opts;
+    capturedMiddleware = mw;
+    capturedOptions = opts;
   });
   const middlewareStack = { add };
   return {
     client: { middlewareStack } as never,
-    captured,
+    /** Returns the registered middleware or throws if `wrapClient` did not register one. */
+    middleware: (): Middleware => {
+      if (capturedMiddleware === null) {
+        throw new Error('wrapClient did not register a middleware on the fake client');
+      }
+      return capturedMiddleware;
+    },
+    /** Returns the registration options or null if no middleware was registered. */
+    options: (): { step?: string; name?: string } | null => capturedOptions,
     addSpy: add,
   };
 }
@@ -98,37 +102,37 @@ function makeFailingService(error: Error) {
 
 describe('wrapClient middleware (GRD-01..07)', () => {
   it('registers ONE middleware at step "initialize" with the canonical name (Pitfall #3)', () => {
-    const { client, captured, addSpy } = makeFakeClient();
+    const fake = makeFakeClient();
     const { service } = makeFakeService('free');
-    wrapClient({ client, config: baseConfig(), internalService: service });
-    expect(addSpy).toHaveBeenCalledTimes(1);
-    expect(captured.options).toEqual({ step: 'initialize', name: 'electrodb-migrations-guard' });
-    expect(captured.middleware).toBeTypeOf('function');
+    wrapClient({ client: fake.client, config: baseConfig(), internalService: service });
+    expect(fake.addSpy).toHaveBeenCalledTimes(1);
+    expect(fake.options()).toEqual({ step: 'initialize', name: 'electrodb-migrations-guard' });
+    expect(fake.middleware()).toBeTypeOf('function');
   });
 
   it('returns the SAME client instance (mutated in place)', () => {
-    const { client } = makeFakeClient();
+    const fake = makeFakeClient();
     const { service } = makeFakeService('free');
-    const result = wrapClient({ client, config: baseConfig(), internalService: service });
-    expect(result).toBe(client);
+    const result = wrapClient({ client: fake.client, config: baseConfig(), internalService: service });
+    expect(result).toBe(fake.client);
   });
 
   it('passes through when lockState is "free" (GRD-04)', async () => {
-    const { client, captured } = makeFakeClient();
+    const fake = makeFakeClient();
     const { service } = makeFakeService('free');
-    wrapClient({ client, config: baseConfig(), internalService: service });
+    wrapClient({ client: fake.client, config: baseConfig(), internalService: service });
     const next = vi.fn(async (a: unknown) => ({ output: 'ok', input: a }));
-    const handler = captured.middleware!(next, { commandName: 'PutItemCommand' });
+    const handler = fake.middleware()(next, { commandName: 'PutItemCommand' });
     await expect(handler({ marker: 'in' })).resolves.toEqual({ output: 'ok', input: { marker: 'in' } });
     expect(next).toHaveBeenCalledTimes(1);
   });
 
   it('throws EDBMigrationInProgressError with {runId, lockState} when lockState is in GATING_LOCK_STATES (apply)', async () => {
-    const { client, captured } = makeFakeClient();
+    const fake = makeFakeClient();
     const { service } = makeFakeService('apply', 'r-1');
-    wrapClient({ client, config: baseConfig(), internalService: service });
+    wrapClient({ client: fake.client, config: baseConfig(), internalService: service });
     const next = vi.fn();
-    const handler = captured.middleware!(next, { commandName: 'PutItemCommand' });
+    const handler = fake.middleware()(next, { commandName: 'PutItemCommand' });
     await expect(handler({})).rejects.toMatchObject({
       code: 'EDB_MIGRATION_IN_PROGRESS',
       details: expect.objectContaining({ runId: 'r-1', lockState: 'apply' }),
@@ -142,11 +146,11 @@ describe('wrapClient middleware (GRD-01..07)', () => {
     ['failed', 'r-4'],
     ['dying', 'r-5'],
   ] as const)('throws on lockState=%s (every gating state, Decision A7 set)', async (state, runId) => {
-    const { client, captured } = makeFakeClient();
+    const fake = makeFakeClient();
     const { service } = makeFakeService(state, runId);
-    wrapClient({ client, config: baseConfig(), internalService: service });
+    wrapClient({ client: fake.client, config: baseConfig(), internalService: service });
     const next = vi.fn();
-    const handler = captured.middleware!(next, { commandName: 'PutItemCommand' });
+    const handler = fake.middleware()(next, { commandName: 'PutItemCommand' });
     await expect(handler({})).rejects.toMatchObject({
       code: 'EDB_MIGRATION_IN_PROGRESS',
       details: expect.objectContaining({ runId, lockState: state }),
@@ -155,21 +159,21 @@ describe('wrapClient middleware (GRD-01..07)', () => {
   });
 
   it('passes through "finalize" (Decision A7 — README §1 wins; finalize NOT in gating set)', async () => {
-    const { client, captured } = makeFakeClient();
+    const fake = makeFakeClient();
     const { service } = makeFakeService('finalize', 'r-1');
-    wrapClient({ client, config: baseConfig(), internalService: service });
+    wrapClient({ client: fake.client, config: baseConfig(), internalService: service });
     const next = vi.fn(async () => ({ output: 'finalize-passes' }));
-    const handler = captured.middleware!(next, { commandName: 'PutItemCommand' });
+    const handler = fake.middleware()(next, { commandName: 'PutItemCommand' });
     await expect(handler({})).resolves.toEqual({ output: 'finalize-passes' });
     expect(next).toHaveBeenCalledTimes(1);
   });
 
   it('blockMode: "writes-only" lets read commands through WITHOUT invoking the lock-row read (GRD-05)', async () => {
-    const { client, captured } = makeFakeClient();
+    const fake = makeFakeClient();
     const { service, getSpy } = makeFakeService('apply', 'r-1');
-    wrapClient({ client, config: baseConfig({ blockMode: 'writes-only' }), internalService: service });
+    wrapClient({ client: fake.client, config: baseConfig({ blockMode: 'writes-only' }), internalService: service });
     const next = vi.fn(async () => ({ output: 'read-ok' }));
-    const handler = captured.middleware!(next, { commandName: 'GetCommand' });
+    const handler = fake.middleware()(next, { commandName: 'GetCommand' });
     await expect(handler({})).resolves.toEqual({ output: 'read-ok' });
     expect(next).toHaveBeenCalledTimes(1);
     // Critical: a read in writes-only mode MUST NOT trigger a lock-row fetch.
@@ -177,11 +181,11 @@ describe('wrapClient middleware (GRD-01..07)', () => {
   });
 
   it('blockMode: "writes-only" still GATES writes when locked (GRD-05)', async () => {
-    const { client, captured } = makeFakeClient();
+    const fake = makeFakeClient();
     const { service } = makeFakeService('apply', 'r-1');
-    wrapClient({ client, config: baseConfig({ blockMode: 'writes-only' }), internalService: service });
+    wrapClient({ client: fake.client, config: baseConfig({ blockMode: 'writes-only' }), internalService: service });
     const next = vi.fn();
-    const handler = captured.middleware!(next, { commandName: 'PutCommand' });
+    const handler = fake.middleware()(next, { commandName: 'PutCommand' });
     await expect(handler({})).rejects.toMatchObject({
       code: 'EDB_MIGRATION_IN_PROGRESS',
       details: expect.objectContaining({ runId: 'r-1', lockState: 'apply' }),
@@ -190,21 +194,21 @@ describe('wrapClient middleware (GRD-01..07)', () => {
   });
 
   it('blockMode: "all" (default) invokes the lock-row read on read commands too', async () => {
-    const { client, captured } = makeFakeClient();
+    const fake = makeFakeClient();
     const { service, getSpy } = makeFakeService('apply', 'r-1');
-    wrapClient({ client, config: baseConfig({ blockMode: 'all' }), internalService: service });
+    wrapClient({ client: fake.client, config: baseConfig({ blockMode: 'all' }), internalService: service });
     const next = vi.fn();
-    const handler = captured.middleware!(next, { commandName: 'GetCommand' });
+    const handler = fake.middleware()(next, { commandName: 'GetCommand' });
     await expect(handler({})).rejects.toMatchObject({ code: 'EDB_MIGRATION_IN_PROGRESS' });
     expect(getSpy).toHaveBeenCalledTimes(1);
   });
 
   it('fails CLOSED when readLockRow rejects (GRD-06 / Pitfall #1)', async () => {
-    const { client, captured } = makeFakeClient();
+    const fake = makeFakeClient();
     const { service } = makeFailingService(new Error('DDB throttle'));
-    wrapClient({ client, config: baseConfig(), internalService: service });
+    wrapClient({ client: fake.client, config: baseConfig(), internalService: service });
     const next = vi.fn();
-    const handler = captured.middleware!(next, { commandName: 'PutItemCommand' });
+    const handler = fake.middleware()(next, { commandName: 'PutItemCommand' });
     await expect(handler({})).rejects.toMatchObject({
       code: 'EDB_MIGRATION_IN_PROGRESS',
       details: expect.objectContaining({ cause: 'DDB throttle' }),
@@ -213,22 +217,22 @@ describe('wrapClient middleware (GRD-01..07)', () => {
   });
 
   it('reads lock row with consistent: CONSISTENT_READ (GRD-02 — via readLockRow chokepoint)', async () => {
-    const { client, captured } = makeFakeClient();
+    const fake = makeFakeClient();
     const { service, goCalls } = makeFakeService('free');
-    wrapClient({ client, config: baseConfig(), internalService: service });
+    wrapClient({ client: fake.client, config: baseConfig(), internalService: service });
     const next = vi.fn(async () => ({ output: 'ok' }));
-    const handler = captured.middleware!(next, { commandName: 'PutItemCommand' });
+    const handler = fake.middleware()(next, { commandName: 'PutItemCommand' });
     await handler({});
     expect(goCalls.length).toBe(1);
     expect(goCalls[0]).toEqual({ consistent: true });
   });
 
   it('caches the lock-row read across multiple invocations within TTL (GRD-03 — single fetch for two writes)', async () => {
-    const { client, captured } = makeFakeClient();
+    const fake = makeFakeClient();
     const { service, getSpy } = makeFakeService('free');
-    wrapClient({ client, config: baseConfig(), internalService: service });
+    wrapClient({ client: fake.client, config: baseConfig(), internalService: service });
     const next = vi.fn(async () => ({ output: 'ok' }));
-    const handler = captured.middleware!(next, { commandName: 'PutItemCommand' });
+    const handler = fake.middleware()(next, { commandName: 'PutItemCommand' });
     await handler({});
     await handler({});
     expect(next).toHaveBeenCalledTimes(2);
@@ -245,10 +249,10 @@ describe('wrapClient middleware (GRD-01..07)', () => {
       migrationRuns: {} as never,
       migrationState: { get },
     } as never;
-    const { client, captured } = makeFakeClient();
-    wrapClient({ client, config: baseConfig(), internalService: service });
+    const fake = makeFakeClient();
+    wrapClient({ client: fake.client, config: baseConfig(), internalService: service });
     const next = vi.fn(async () => ({ output: 'pass' }));
-    const handler = captured.middleware!(next, { commandName: 'PutItemCommand' });
+    const handler = fake.middleware()(next, { commandName: 'PutItemCommand' });
     await expect(handler({})).resolves.toEqual({ output: 'pass' });
     expect(next).toHaveBeenCalledTimes(1);
   });
