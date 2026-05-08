@@ -17,7 +17,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { MIGRATION_STATE_ID, createMigrationStateEntity } from '../../../src/entities/migration-state.js';
+import { MIGRATION_STATE_ID, createMigrationStateEntity } from '../../../src/internal-entities/migration-state.js';
 import { createTestTable, deleteTestTable, isDdbLocalReachable, makeDdbLocalClient, randomTableName, skipMessage } from '../_helpers/index.js';
 
 interface OperatorOutcome {
