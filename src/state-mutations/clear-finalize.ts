@@ -1,5 +1,6 @@
 import { EDBMigrationLockHeldError } from '../errors/index.js';
 import { MIGRATION_STATE_ID, type MigrationsServiceBundle } from '../internal-entities/index.js';
+import { isConditionalCheckFailed } from './cancellation.js';
 
 /** Inputs for {@link clearFinalizeMode}. */
 export interface ClearFinalizeModeArgs {
@@ -39,9 +40,10 @@ export async function clearFinalizeMode(service: MigrationsServiceBundle, args: 
     .go()
     .catch((err: unknown) => {
       // Translate a ConditionalCheckFailed into the same EDBMigrationLockHeldError
-      // shape that `clear` uses so callers get consistent error types.
-      const msg = typeof err === 'object' && err !== null && typeof (err as { message?: unknown }).message === 'string' ? (err as { message: string }).message : '';
-      if (msg.includes('ConditionalCheckFailed')) {
+      // shape that `clear` uses so callers get consistent error types. Use the
+      // canonical helper from ./cancellation.js rather than substring-matching
+      // the AWS SDK error message, which can drift across SDK versions.
+      if (isConditionalCheckFailed(err)) {
         throw new EDBMigrationLockHeldError('clearFinalizeMode refused — lock no longer held by this runner or not in finalize state', {});
       }
       throw err;

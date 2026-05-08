@@ -3,7 +3,7 @@ import type { ResolvedConfig } from '../config/index.js';
 import type { MigrationsServiceBundle } from '../internal-entities/index.js';
 import { acquireLock, startLockHeartbeat } from '../lock/index.js';
 import type { AnyElectroEntity, Migration } from '../migrations/index.js';
-import { clearFinalizeMode, markFailed } from '../state-mutations/index.js';
+import { clearFinalizeMode, isConditionalCheckFailed, markFailed } from '../state-mutations/index.js';
 import { type ItemCounts, createCountAudit } from './count-audit.js';
 import { iterateV1Records } from './scan-pipeline.js';
 import { sleep } from './sleep.js';
@@ -109,15 +109,3 @@ export async function finalizeFlow(args: FinalizeFlowArgs): Promise<FinalizeFlow
   }
 }
 
-/**
- * Duck-typed check for DDB ConditionalCheckFailedException. Never `instanceof` —
- * dual-package-safe pattern from `src/state-mutations/cancellation.ts`.
- */
-function isConditionalCheckFailed(err: unknown): boolean {
-  if (typeof err !== 'object' || err === null) return false;
-  const name = (err as { name?: unknown }).name;
-  const message = (err as { message?: unknown }).message;
-  if (typeof name === 'string' && name === 'ConditionalCheckFailedException') return true;
-  if (typeof message === 'string' && message.includes('ConditionalCheckFailedException')) return true;
-  return false;
-}
