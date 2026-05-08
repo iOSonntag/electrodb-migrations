@@ -116,31 +116,38 @@ export interface TransactionWriteResult {
 }
 
 /**
- * Returns true iff the ElectroDB transactWrite result reports the lock-row
- * mutation (item 0) was rejected by `ConditionalCheckFailed`. ElectroDB v3
- * intercepts AWS SDK's `TransactionCanceledException` and surfaces it as
- * `{canceled: true, data: [...]}` instead of re-throwing — every verb must
- * inspect this result rather than relying on a try/catch.
+ * Returns true iff the ElectroDB transactWrite result reports ANY item was
+ * rejected by `ConditionalCheckFailed`. ElectroDB v3 intercepts AWS SDK's
+ * `TransactionCanceledException` and surfaces it as `{canceled: true, data:
+ * [...]}` — DDB reports a per-item rejection map, so cancellation can be
+ * rooted at item 1 or 2 of a multi-item transactWrite (e.g. a `migrations`
+ * patch failing because the row does not exist) while item 0 is reported as
+ * `None`. Every verb must scan all items rather than just data[0].
  */
 export function isResultConditionalCheckFailed(result: TransactionWriteResult): boolean {
   if (!result.canceled) return false;
-  const item0 = result.data?.[0];
-  return item0?.rejected === true && item0.code === 'ConditionalCheckFailed';
+  if (!Array.isArray(result.data)) return false;
+  return result.data.some((d) => d?.rejected === true && d.code === 'ConditionalCheckFailed');
 }
 
 /**
- * Extract item-0's cancellation reason from the ElectroDB transactWrite result.
- * Mirrors {@link extractCancellationReason} but for the `{canceled, data}` shape
- * that ElectroDB returns instead of throwing.
+ * Extract the FIRST cancellation reason from the ElectroDB transactWrite
+ * result. By Pitfall #7 convention, item 0 is the lock-row mutation when
+ * present, so its diagnosis (current holder via `ALL_OLD`) is preferred.
+ * If item 0 succeeded but a later item failed, the helper returns that item's
+ * reason with the `index` field reflecting the actual position. Mirrors
+ * {@link extractCancellationReason} but for the `{canceled, data}` shape.
  */
 export function extractResultCancellationReason(result: TransactionWriteResult): CancellationReason | null {
-  if (!result.canceled) return null;
-  const item0 = result.data?.[0];
-  if (!item0?.rejected) return null;
+  if (!result.canceled || !Array.isArray(result.data)) return null;
+  const idx = result.data.findIndex((d) => d?.rejected === true);
+  if (idx < 0) return null;
+  const item = result.data[idx];
+  if (!item) return null;
   const reason: CancellationReason = {
-    index: 0,
-    code: item0.code ?? 'Unknown',
+    index: idx,
+    code: item.code ?? 'Unknown',
   };
-  if (item0.item) reason.item = item0.item;
+  if (item.item) reason.item = item.item;
   return reason;
 }
