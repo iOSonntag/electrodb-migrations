@@ -19,6 +19,7 @@ vi.mock('../../../src/lock/index.js', () => ({
 
 vi.mock('../../../src/state-mutations/index.js', () => ({
   clear: vi.fn().mockResolvedValue(undefined),
+  clearFinalizeMode: vi.fn().mockResolvedValue(undefined),
   markFailed: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -28,7 +29,7 @@ vi.mock('../../../src/runner/sleep.js', () => ({
 
 // Import mocked symbols AFTER vi.mock declarations.
 import { acquireLock, startLockHeartbeat } from '../../../src/lock/index.js';
-import { clear, markFailed } from '../../../src/state-mutations/index.js';
+import { clear, clearFinalizeMode, markFailed } from '../../../src/state-mutations/index.js';
 import { sleep } from '../../../src/runner/sleep.js';
 
 // ---------------------------------------------------------------------------
@@ -120,11 +121,11 @@ describe('FF-1: acquireLock mode', () => {
 });
 
 // ---------------------------------------------------------------------------
-// FF-2: Call order — acquireLock → heartbeat → sleep → scan → patch → clear → stop
+// FF-2: Call order — acquireLock → heartbeat → sleep → scan → patch → clearFinalizeMode → stop
 // ---------------------------------------------------------------------------
 
 describe('FF-2: call order', () => {
-  it('acquireLock → startLockHeartbeat → sleep → (scan) → migrations.patch → clear → sched.stop', async () => {
+  it('acquireLock → startLockHeartbeat → sleep → (scan) → migrations.patch → clearFinalizeMode → sched.stop', async () => {
     const { service } = makeRunnerStubService();
     const pagesQueue: Array<Array<Record<string, unknown>>> = [[{ id: 'u-1', sk: 'sk-1' }]];
     const mig = makeMigrationStub(pagesQueue);
@@ -142,23 +143,23 @@ describe('FF-2: call order', () => {
     const acquireOrder = vi.mocked(acquireLock).mock.invocationCallOrder[0];
     const heartbeatOrder = vi.mocked(startLockHeartbeat).mock.invocationCallOrder[0];
     const sleepOrder = vi.mocked(sleep).mock.invocationCallOrder[0];
-    const clearOrder = vi.mocked(clear).mock.invocationCallOrder[0];
+    const clearFinalizeModeOrder = vi.mocked(clearFinalizeMode).mock.invocationCallOrder[0];
     const stopOrder = mockSchedStop.mock.invocationCallOrder[0];
 
     expect(acquireOrder).toBeDefined();
     expect(heartbeatOrder).toBeGreaterThan(acquireOrder!);
     expect(sleepOrder).toBeGreaterThan(heartbeatOrder!);
-    expect(clearOrder).toBeGreaterThan(sleepOrder!);
-    expect(stopOrder).toBeGreaterThan(clearOrder!);
+    expect(clearFinalizeModeOrder).toBeGreaterThan(sleepOrder!);
+    expect(stopOrder).toBeGreaterThan(clearFinalizeModeOrder!);
   });
 });
 
 // ---------------------------------------------------------------------------
-// FF-3: Empty scan — patch + clear STILL fire; result has zero counts
+// FF-3: Empty scan — patch + clearFinalizeMode STILL fire; result has zero counts
 // ---------------------------------------------------------------------------
 
 describe('FF-3: empty scan', () => {
-  it('fires patch + clear even when no v1 records exist; counts are all zero', async () => {
+  it('fires patch + clearFinalizeMode even when no v1 records exist; counts are all zero', async () => {
     const { service } = makeRunnerStubService();
     const pagesQueue: Array<Array<Record<string, unknown>>> = [[]]; // one empty page (cursor=null immediately)
     const mig = makeMigrationStub(pagesQueue);
@@ -174,7 +175,7 @@ describe('FF-3: empty scan', () => {
     });
 
     expect(result.itemCounts).toEqual({ scanned: 0, migrated: 0, skipped: 0, failed: 0 });
-    expect(vi.mocked(clear)).toHaveBeenCalledOnce();
+    expect(vi.mocked(clearFinalizeMode)).toHaveBeenCalledOnce();
     expect(vi.mocked(markFailed)).not.toHaveBeenCalled();
   });
 });
@@ -208,7 +209,7 @@ describe('FF-4: Pitfall 7 — concurrent app delete', () => {
     });
 
     expect(result.itemCounts).toEqual({ scanned: 2, migrated: 1, skipped: 1, failed: 0 });
-    expect(vi.mocked(clear)).toHaveBeenCalledOnce();
+    expect(vi.mocked(clearFinalizeMode)).toHaveBeenCalledOnce();
     expect(vi.mocked(markFailed)).not.toHaveBeenCalled();
   });
 });
@@ -239,28 +240,28 @@ describe('FF-5: unexpected delete error (RUN-08 fail-fast)', () => {
     ).rejects.toThrow('ProvisionedThroughputExceededException');
 
     expect(vi.mocked(markFailed)).toHaveBeenCalledOnce();
-    expect(vi.mocked(clear)).not.toHaveBeenCalled();
+    expect(vi.mocked(clearFinalizeMode)).not.toHaveBeenCalled();
   });
 });
 
 // ---------------------------------------------------------------------------
-// FF-6: assertInvariant runs BEFORE patch + clear
+// FF-6: assertInvariant runs BEFORE patch + clearFinalizeMode
 // ---------------------------------------------------------------------------
 
 describe('FF-6: assertInvariant call order', () => {
-  it('assertInvariant fires before migrations.patch and clear', async () => {
-    // We verify this by making clear throw and confirming patch was called before clear.
-    // Since assertInvariant is synchronous and inside try-block before patch, if it
-    // ran AFTER patch we couldn't observe it. Instead: confirm patch IS called (assertInvariant
-    // did not throw), which means invariant was satisfied (scanned == migrated + skipped + failed).
+  it('assertInvariant fires before migrations.patch and clearFinalizeMode', async () => {
+    // We verify this by making clearFinalizeMode track its call and confirming patch
+    // was called before it. Since assertInvariant is synchronous and inside try-block
+    // before patch, if it ran AFTER patch we couldn't observe it. Instead: confirm patch
+    // IS called (assertInvariant did not throw), which means the invariant was satisfied.
     const { service } = makeRunnerStubService();
     const pagesQueue: Array<Array<Record<string, unknown>>> = [[{ id: 'u-1', sk: 'sk-1' }]];
     const mig = makeMigrationStub(pagesQueue);
 
-    // Track call order: assertInvariant (indirectly via patch being called) then clear.
+    // Track call order: assertInvariant (indirectly via patch being called) then clearFinalizeMode.
     const callOrder: string[] = [];
-    vi.mocked(clear).mockImplementation(async () => {
-      callOrder.push('clear');
+    vi.mocked(clearFinalizeMode).mockImplementation(async () => {
+      callOrder.push('clearFinalizeMode');
     });
     // Intercept patch via the service stub to record its call.
     const patchGoOriginal = service.migrations.patch({ id: 'mig-001' }).go;
@@ -285,8 +286,8 @@ describe('FF-6: assertInvariant call order', () => {
       holder: 'host',
     });
 
-    // patch must come before clear in the call sequence.
-    expect(callOrder.indexOf('patch')).toBeLessThan(callOrder.indexOf('clear'));
+    // patch must come before clearFinalizeMode in the call sequence.
+    expect(callOrder.indexOf('patch')).toBeLessThan(callOrder.indexOf('clearFinalizeMode'));
   });
 });
 
@@ -349,8 +350,7 @@ describe('FF-8: FIN-04 — no auto-rollback', () => {
     const pagesQueue: Array<Array<Record<string, unknown>>> = [[{ id: 'u-1', sk: 'sk-1' }]];
     const mig = makeMigrationStub(pagesQueue);
 
-    // Import the state-mutations module to check that only clear + markFailed are exported
-    // and that clear is the ONLY one called on success (markFailed is NOT called).
+    // Check that only clearFinalizeMode is called on success (not markFailed, not clear).
     await finalizeFlow({
       service: service as never,
       config: makeConfig() as never,
@@ -361,8 +361,9 @@ describe('FF-8: FIN-04 — no auto-rollback', () => {
       holder: 'host',
     });
 
-    // On success: clear IS called; markFailed is NOT.
-    expect(vi.mocked(clear)).toHaveBeenCalledOnce();
+    // On success: clearFinalizeMode IS called; markFailed and clear are NOT.
+    expect(vi.mocked(clearFinalizeMode)).toHaveBeenCalledOnce();
+    expect(vi.mocked(clear)).not.toHaveBeenCalled();
     expect(vi.mocked(markFailed)).not.toHaveBeenCalled();
     // The scan-delete loop only calls delete, never any rollback-like verb.
     // migration.from.delete is the only action on each record.

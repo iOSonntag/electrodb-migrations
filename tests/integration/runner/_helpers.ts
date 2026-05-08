@@ -26,6 +26,7 @@ import { createMigrationsService } from '../../../src/internal-entities/index.js
 import { createUserAddStatusMigration } from '../../_helpers/sample-migrations/User-add-status/index.js';
 import { createUserV1 } from '../../_helpers/sample-migrations/User-add-status/v1.js';
 import { createUserV2 } from '../../_helpers/sample-migrations/User-add-status/v2.js';
+import { createUserAddTierMigration } from '../../_helpers/sample-migrations/User-add-tier/index.js';
 import {
   bootstrapMigrationState,
   createTestTable,
@@ -58,8 +59,28 @@ export interface ApplyTestTableSetup {
   v1Entity: ReturnType<typeof createUserV1>;
   /** Bound UserV2 entity pointing at `tableName`. */
   v2Entity: ReturnType<typeof createUserV2>;
-  /** Bound User v1→v2 migration pointing at `tableName`. */
+  /**
+   * Factory for creating a UserV2 entity bound to a custom client (e.g. the
+   * guarded client). Used by B-03 guarded-read-during-finalize test so it can
+   * build a v2 entity that goes through the guard middleware.
+   *
+   * @param client - Any DynamoDBDocumentClient (guarded or unguarded).
+   * @param table  - Table name (use `setup.tableName`).
+   */
+  v2EntityFactory: (client: DynamoDBDocumentClient, table: string) => ReturnType<typeof createUserV2>;
+  /** Bound User v1→v2 (add-status) migration pointing at `tableName`. */
   migration: ReturnType<typeof createUserAddStatusMigration>;
+  /**
+   * Alias for `migration` — named for clarity in tests that use both
+   * `migrationStatus` and `migrationTier` (sequence-enforcement tests).
+   */
+  migrationStatus: ReturnType<typeof createUserAddStatusMigration>;
+  /**
+   * Bound User v2→v3 (add-tier) migration pointing at `tableName`.
+   * Used by sequence-enforcement tests (RUN-06) that need TWO migrations in the
+   * pending list to verify per-entity ordering.
+   */
+  migrationTier: ReturnType<typeof createUserAddTierMigration>;
   /** Tear down the ephemeral table (call in `afterAll`). */
   cleanup: () => Promise<void>;
 }
@@ -90,6 +111,7 @@ export async function setupApplyTestTable(args: { recordCount?: number; tableNam
   const v1Entity = createUserV1(doc, tableName);
   const v2Entity = createUserV2(doc, tableName);
   const migration = createUserAddStatusMigration(doc, tableName);
+  const migrationTier = createUserAddTierMigration(doc, tableName);
   const service = createMigrationsService(doc, tableName);
 
   if (recordCount > 0) {
@@ -100,5 +122,17 @@ export async function setupApplyTestTable(args: { recordCount?: number; tableNam
     await deleteTestTable(raw, tableName);
   };
 
-  return { service, tableName, raw, doc, v1Entity, v2Entity, migration, cleanup };
+  return {
+    service,
+    tableName,
+    raw,
+    doc,
+    v1Entity,
+    v2Entity,
+    v2EntityFactory: createUserV2,
+    migration,
+    migrationStatus: migration,
+    migrationTier,
+    cleanup,
+  };
 }

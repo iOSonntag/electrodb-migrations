@@ -3,7 +3,7 @@ import type { ResolvedConfig } from '../config/index.js';
 import type { MigrationsServiceBundle } from '../internal-entities/index.js';
 import { acquireLock, startLockHeartbeat } from '../lock/index.js';
 import type { AnyElectroEntity, Migration } from '../migrations/index.js';
-import { clear, markFailed } from '../state-mutations/index.js';
+import { clearFinalizeMode, markFailed } from '../state-mutations/index.js';
 import { type ItemCounts, createCountAudit } from './count-audit.js';
 import { iterateV1Records } from './scan-pipeline.js';
 import { sleep } from './sleep.js';
@@ -62,9 +62,11 @@ export async function finalizeFlow(args: FinalizeFlowArgs): Promise<FinalizeFlow
         audit.incrementScanned();
         try {
           // ElectroDB's delete chain accepts the full record and extracts PK fields.
-          await (args.migration.from as unknown as {
-            delete: (r: unknown) => { go: () => Promise<unknown> };
-          })
+          await (
+            args.migration.from as unknown as {
+              delete: (r: unknown) => { go: () => Promise<unknown> };
+            }
+          )
             .delete(v1)
             .go();
           audit.addMigrated(1); // reused as "deleted" — see JSDoc (option a).
@@ -84,12 +86,12 @@ export async function finalizeFlow(args: FinalizeFlowArgs): Promise<FinalizeFlow
 
     // Two-step post-loop: patch finalized THEN clear lock (T-04-10-03).
     const now = new Date().toISOString();
-    await args.service.migrations
-      .patch({ id: args.migration.id })
-      .set({ status: 'finalized', finalizedAt: now })
-      .go();
+    await args.service.migrations.patch({ id: args.migration.id }).set({ status: 'finalized', finalizedAt: now }).go();
 
-    await clear(args.service, { runId: args.runId });
+    // FIN-03: clear the finalize-mode lock back to 'free' using the dedicated
+    // clearFinalizeMode verb (condition: lockState='finalize' AND lockRunId=:runId).
+    // `clear()` is for the apply/rollback release-mode path only (lockState='release').
+    await clearFinalizeMode(args.service, { runId: args.runId });
 
     return { itemCounts: audit.snapshot() };
   } catch (err) {

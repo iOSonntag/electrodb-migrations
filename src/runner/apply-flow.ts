@@ -61,6 +61,20 @@ export async function applyFlow(args: ApplyFlowArgs): Promise<ApplyFlowResult> {
       // eslint-disable-next-line no-console -- diagnostic only; matches heartbeat onAbort CR-04 disposition
       console.error('[electrodb-migrations] applyFlow: markFailed rejected after run failure:', markFailedErr);
     });
+
+    // Best-effort: patch `_migrations.status='failed'` so the audit row reflects the
+    // failed state. The row was PUT in `applyFlowScanWrite` before the loop, so it
+    // should exist. If the PUT itself failed (corner case), this patch will also fail
+    // — that's acceptable because the lock's `failedIds` set (written by `markFailed`)
+    // already surfaces the failure to the operator.
+    await args.service.migrations
+      .patch({ id: args.migration.id })
+      .set({ status: 'failed' })
+      .go()
+      .catch(() => {
+        // Non-fatal: the lock row's failedIds is the authoritative failure surface.
+      });
+
     throw err;
   } finally {
     await sched.stop(); // Pitfall 4 — ALWAYS stop; .stop() is idempotent
@@ -105,6 +119,37 @@ export async function applyFlowScanWrite(args: ApplyFlowArgs): Promise<ApplyFlow
     .go();
 
   const audit = createCountAudit();
+
+  // Ensure the `_migrations` row exists BEFORE the TransactWrite in
+  // `transitionToReleaseMode` (item 1) tries to patch it. ElectroDB's
+  // `patch()` adds an implicit `attribute_exists(pk)` condition that fails
+  // on a non-existent row, causing the entire TransactWrite to be cancelled
+  // with ConditionalCheckFailed. Using `.put()` (unconditional upsert) means
+  // a crash-and-retry drive is also safe — the row is overwritten to 'pending'
+  // before `transitionToReleaseMode` flips it to 'applied'.
+  //
+  // `fingerprint` is required by the entity schema; the validate gate (Phase 7)
+  // will overwrite it with the real sha256 hash at baseline / validate time.
+  // For the apply path we use an empty string as a placeholder.
+  const fromVersion = (args.migration.from as unknown as { model: { version: string } }).model.version;
+  const toVersion = (args.migration.to as unknown as { model: { version: string } }).model.version;
+  await args.service.migrations
+    .put({
+      id: args.migration.id,
+      schemaVersion: MIGRATIONS_SCHEMA_VERSION,
+      kind: 'transform',
+      status: 'pending',
+      entityName: args.migration.entityName,
+      fromVersion,
+      toVersion,
+      fingerprint: '', // Phase 7 validate gate writes the real sha256 fingerprint
+      ...(args.migration.down !== undefined ? { hasDown: true } : {}),
+      ...(args.migration.rollbackResolver !== undefined ? { hasRollbackResolver: true } : {}),
+      ...(args.migration.reads !== undefined && args.migration.reads.length > 0
+        ? { reads: new Set(args.migration.reads.map((e) => (e as unknown as { model: { entity: string } }).model.entity)) }
+        : {}),
+    } as never)
+    .go();
 
   for await (const page of iterateV1Records(args.migration)) {
     const v2Batch: Record<string, unknown>[] = [];

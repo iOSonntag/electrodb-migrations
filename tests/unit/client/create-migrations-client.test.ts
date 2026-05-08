@@ -36,6 +36,7 @@ vi.mock('../../../src/lock/index.js', () => ({
 
 vi.mock('../../../src/state-mutations/index.js', () => ({
   clear: vi.fn(),
+  clearFinalizeMode: vi.fn(),
   acquire: vi.fn(),
   heartbeat: vi.fn(),
   transitionToReleaseMode: vi.fn(),
@@ -81,15 +82,24 @@ import * as internalEntitiesModule from '../../../src/internal-entities/index.js
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Minimal fake middleware stack with clone() support (required by createMigrationsClient isolation). */
+function makeFakeStack() {
+  const stack = {
+    add: vi.fn(),
+    remove: vi.fn(),
+    use: vi.fn(),
+    clone: vi.fn(),
+  };
+  // clone() returns a fresh stack with the same shape so the guard isolation path works.
+  stack.clone.mockImplementation(() => makeFakeStack());
+  return stack;
+}
+
 /** Minimal fake DynamoDBDocumentClient — not a real DDB class. */
 function makeFakeDocClient() {
   return {
     send: vi.fn(async () => ({})),
-    middlewareStack: {
-      add: vi.fn(),
-      remove: vi.fn(),
-      use: vi.fn(),
-    },
+    middlewareStack: makeFakeStack(),
     config: {},
   } as unknown as import('@aws-sdk/lib-dynamodb').DynamoDBDocumentClient;
 }
@@ -98,11 +108,7 @@ function makeFakeDocClient() {
 function makeFakeRawClient() {
   return {
     send: vi.fn(async () => ({})),
-    middlewareStack: {
-      add: vi.fn(),
-      remove: vi.fn(),
-      use: vi.fn(),
-    },
+    middlewareStack: makeFakeStack(),
     config: {},
   } as unknown as import('@aws-sdk/client-dynamodb').DynamoDBClient;
 }

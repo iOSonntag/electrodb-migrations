@@ -7,4 +7,4 @@
 
 export { createUserV1 } from './v1.js';
 export { createUserV2 } from './v2.js';
-export { createUserAddStatusMigration } from './migration.js';
+export { createUserAddStatusMigration, createUserAddStatusMigration_failOn } from './migration.js';
