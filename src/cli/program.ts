@@ -1,18 +1,23 @@
 import { Command } from 'commander';
 
 /**
- * Subcommand-registration callbacks. Plans 08 (init/baseline) and 09 (create)
- * each export a `registerXxxCommand(program)` function; the bin entry
- * (`src/cli/index.ts`) lazy-imports them and passes them in here. This keeps
- * Plan 05 (the CLI substrate) free of any downstream-plan import.
+ * Subcommand-registration callbacks. Phase 2's plans (init/baseline/create)
+ * and Phase 4's plans (apply/release/finalize/status/history) each export a
+ * `registerXxxCommand(program)` function; the bin entry (`src/cli/index.ts`)
+ * lazy-imports them and passes them in here.
  *
- * Phase 4+ extends this surface (apply / release / finalize / status / history
- * / rollback / unlock / validate) by adding more `registerXxxCommand` props.
+ * Phase 5+ extends this surface (rollback / unlock); Phase 7 adds validate /
+ * acknowledge-removal / regenerate.
  */
 export interface BuildProgramOpts {
   registerInit?: (program: Command) => void;
   registerBaseline?: (program: Command) => void;
   registerCreate?: (program: Command) => void;
+  registerApply?: (program: Command) => void;
+  registerRelease?: (program: Command) => void;
+  registerFinalize?: (program: Command) => void;
+  registerStatus?: (program: Command) => void;
+  registerHistory?: (program: Command) => void;
 }
 
 /**
@@ -36,6 +41,11 @@ export function buildProgram(opts: BuildProgramOpts = {}): Command {
   opts.registerInit?.(program);
   opts.registerBaseline?.(program);
   opts.registerCreate?.(program);
+  opts.registerApply?.(program);
+  opts.registerRelease?.(program);
+  opts.registerFinalize?.(program);
+  opts.registerStatus?.(program);
+  opts.registerHistory?.(program);
 
   return program;
 }
