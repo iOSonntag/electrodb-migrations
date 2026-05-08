@@ -98,11 +98,10 @@ describe('extractCancellationReason', () => {
       CancellationReasons: [{ Code: 'ConditionalCheckFailed' }],
     };
     const reason = extractCancellationReason(err);
-    expect(reason).toEqual<CancellationReason>({
-      index: 0,
-      code: 'ConditionalCheckFailed',
-      item: undefined,
-    });
+    expect(reason).not.toBeNull();
+    expect(reason?.index).toBe(0);
+    expect(reason?.code).toBe('ConditionalCheckFailed');
+    expect(reason?.item).toBeUndefined();
   });
 
   it("returns null when CancellationReasons is missing", () => {

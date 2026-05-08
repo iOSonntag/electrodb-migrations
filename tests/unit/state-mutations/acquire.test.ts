@@ -86,7 +86,7 @@ function makeStubService(transactionGoImpl?: () => Promise<unknown>) {
           return chain;
         },
         commit(options?: Record<string, unknown>) {
-          builder.commitOptions = options;
+          if (options !== undefined) builder.commitOptions = options;
           captured.push(builder);
           return builder;
         },
@@ -96,7 +96,7 @@ function makeStubService(transactionGoImpl?: () => Promise<unknown>) {
     function stubPutChain(builder: Captured): unknown {
       const chain = {
         commit(options?: Record<string, unknown>) {
-          builder.commitOptions = options;
+          if (options !== undefined) builder.commitOptions = options;
           captured.push(builder);
           return builder;
         },
@@ -229,13 +229,11 @@ describe('state-mutations.acquire (LCK-01, LCK-03 conditional shape)', () => {
     expect(condition).not.toContain('eq(lockState,"failed")');
   });
 
-  it('item 0 commits with ReturnValuesOnConditionCheckFailure ALL_OLD', async () => {
+  it("item 0 commits with response='all_old' (ElectroDB's surface for ReturnValuesOnConditionCheckFailure)", async () => {
     const { service, captured } = makeStubService();
     await acquire(service as never, baseConfig, baseArgs);
 
-    expect(captured[0]?.commitOptions).toMatchObject({
-      returnValuesOnConditionCheckFailure: 'ALL_OLD',
-    });
+    expect(captured[0]?.commitOptions).toMatchObject({ response: 'all_old' });
   });
 
   it('throws EDBMigrationLockHeldError when transactWrite is cancelled with ConditionalCheckFailed on item 0', async () => {
