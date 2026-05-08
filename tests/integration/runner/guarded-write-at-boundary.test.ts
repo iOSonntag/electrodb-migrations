@@ -122,12 +122,13 @@ describe('B-02 — guarded write at multi-migration boundary (Decision A7: relea
           return { ok: true };
         } catch (err) {
           const e = err as { code?: string; details?: { lockState?: string } };
-          return {
+          const out: Outcome = {
             ok: false,
-            code: e.code,
-            lockState: e.details?.lockState,
             isInProgress: isMigrationInProgress(err),
           };
+          if (e.code !== undefined) out.code = e.code;
+          if (e.details?.lockState !== undefined) out.lockState = e.details.lockState;
+          return out;
         }
       };
 
