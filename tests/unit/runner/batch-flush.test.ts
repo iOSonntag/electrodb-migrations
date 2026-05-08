@@ -120,7 +120,7 @@ describe('runner.batchFlushV2 (RUN-03)', () => {
         throw new Error('schema validation');
       },
     });
-    (migration as { to: { put: typeof putSpy } }).to.put = putSpy;
+    (migration as unknown as { to: { put: typeof putSpy } }).to.put = putSpy;
 
     await expect(
       batchFlushV2({
@@ -147,14 +147,16 @@ describe('runner.batchFlushV2 (RUN-03)', () => {
       },
     });
 
-    await expect(
-      batchFlushV2({
-        migration: migration as never,
-        client: stub.client as never,
-        tableName,
-        records,
-      }),
-    ).rejects.toThrow('EDB_BATCH_WRITE_EXHAUSTED');
+    // EDBBatchWriteExhaustedError has code='EDB_BATCH_WRITE_EXHAUSTED' on the error object
+    const err = await batchFlushV2({
+      migration: migration as never,
+      client: stub.client as never,
+      tableName,
+      records,
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as { code?: string }).code).toBe('EDB_BATCH_WRITE_EXHAUSTED');
   });
 
   it('BF-7: RequestItems shape for 25 records matches exact structure', async () => {
@@ -189,7 +191,7 @@ describe('runner.batchFlushV2 (RUN-03)', () => {
     const stub = makeRunnerStubService();
     const migration = stub.makeMigration();
     const putSpy = vi.fn();
-    (migration as { to: { put: typeof putSpy } }).to.put = putSpy;
+    (migration as unknown as { to: { put: typeof putSpy } }).to.put = putSpy;
 
     const result = await batchFlushV2({
       migration: migration as never,
