@@ -224,7 +224,18 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
           const pendingList = await resolvePendingMigrations(undefined, { config: args.config, service: bundle, cwd });
           migrationObj = pendingList.find((p) => p.id === row.id)?.migration;
         }
-        if (!migrationObj) continue; // migration not found — skip (operator alert)
+        if (!migrationObj) {
+          // README §1 contract: a migration cannot leave the table in a half-migrated
+          // state without explicit operator action. Silently skipping an applied
+          // migration whose source has vanished violates that — fail closed and
+          // hand the operator an actionable remediation.
+          const err: Error & { code?: string; remediation?: string } = new Error(
+            `finalize --all: migration source for '${row.id}' is not available on disk or in the preloaded migrations array.`,
+          );
+          err.code = 'EDB_MIGRATION_SOURCE_MISSING';
+          err.remediation = `Restore the migration source under '${args.config.migrations}/${row.id}' or pass it via the 'migrations' option, then re-run.`;
+          throw err;
+        }
         const result = await finalizeFlow({
           service: bundle,
           config: args.config,
