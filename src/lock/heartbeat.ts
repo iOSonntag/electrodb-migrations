@@ -26,10 +26,21 @@ export function startLockHeartbeat(args: StartLockHeartbeatArgs): HeartbeatSched
     intervalMs: args.config.lock.heartbeatMs,
     work: () => heartbeatMutation(args.service, { runId: args.runId }),
     onAbort: (err) => {
-      void markFailed(args.service, {
+      // CR-04 fix: attach a `.catch` rather than `void`-ing the Promise.
+      // The most likely rejection here is `EDBMigrationLockHeldError` from
+      // markFailed when another runner has taken over (the lockRunId WHERE
+      // clause no longer matches). On Node 15+ an unhandled rejection
+      // crashes the host process — that is exactly the wrong outcome on the
+      // path that was supposed to be the safety net. Diagnostic-only logging
+      // here; the runner's outer loop has already lost the lock and will
+      // exit on its next acquireLock guard regardless.
+      markFailed(args.service, {
         runId: args.runId,
         ...(args.migId !== undefined ? { migId: args.migId } : {}),
         cause: err,
+      }).catch((markFailedErr) => {
+        // eslint-disable-next-line no-console -- diagnostic only; framework has no logger surface in v0.1
+        console.error('[electrodb-migrations] heartbeat abort: markFailed rejected:', markFailedErr);
       });
     },
   });

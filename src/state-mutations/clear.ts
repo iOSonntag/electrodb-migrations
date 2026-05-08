@@ -42,7 +42,12 @@ export async function clear(service: MigrationsServiceBundle, args: ClearArgs): 
       migrationState
         .patch({ id: MIGRATION_STATE_ID })
         .set({ lockState: 'free', updatedAt: now })
-        .remove(['lockHolder', 'lockRunId', 'lockMigrationId', 'lockAcquiredAt', 'heartbeatAt'])
+        // CR-02 fix: also drop releaseIds — the set is per-cycle bookkeeping
+        // (which migrations went through release-mode this batch) and the
+        // batch is over once the lock returns to 'free'. Without this remove,
+        // releaseIds grows unbounded across migration cycles and Phase 4's
+        // `status` command would surface phantom "pending release" entries.
+        .remove(['lockHolder', 'lockRunId', 'lockMigrationId', 'lockAcquiredAt', 'heartbeatAt', 'releaseIds'])
         .where(({ lockState, lockRunId, inFlightIds }, op) => `${op.eq(lockState, 'release')} AND ${op.eq(lockRunId, args.runId)} AND ${op.notExists(inFlightIds)}`)
         .commit(),
     ])

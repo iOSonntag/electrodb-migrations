@@ -41,9 +41,14 @@ export async function markFailed(service: MigrationsServiceBundle, args: MarkFai
   const result = (await service.service.transaction
     .write(({ migrationState, migrationRuns }) => {
       const stateOp = migrationState.patch({ id: MIGRATION_STATE_ID }).set({ lockState: 'failed', heartbeatAt: now, updatedAt: now });
-      // Branch on `migId` rather than passing an empty `.add({})` (which
-      // ElectroDB rejects as malformed).
-      const stateWithAdd = args.migId ? stateOp.add({ failedIds: [args.migId] }) : stateOp;
+      // CR-03 fix: branch on `migId` and on the same write also delete
+      // migId from inFlightIds. Without the delete, the same migId would
+      // appear in BOTH inFlightIds and failedIds, contradicting the set
+      // semantics documented on _migration_state and breaking Phase 4's
+      // `status` command which uses inFlightIds as the "still working" set.
+      // ElectroDB rejects empty `.add({})` / `.delete({})` shapes, so the
+      // branches stay distinct.
+      const stateWithAdd = args.migId ? stateOp.add({ failedIds: [args.migId] }).delete({ inFlightIds: [args.migId] }) : stateOp;
       return [
         stateWithAdd.where(({ lockRunId }, op) => op.eq(lockRunId, args.runId)).commit(),
         migrationRuns
