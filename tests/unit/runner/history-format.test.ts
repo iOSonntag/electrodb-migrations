@@ -34,20 +34,20 @@ describe('formatHistoryJson', () => {
     expect(result).toMatchInlineSnapshot(`
 "[
   {
-    \\"id\\": \\"20260501083042-User-add-status\\",
-    \\"schemaVersion\\": 1,
-    \\"kind\\": \\"transform\\",
-    \\"status\\": \\"applied\\",
-    \\"appliedAt\\": \\"2026-05-01T08:30:42Z\\",
-    \\"fromVersion\\": \\"1\\",
-    \\"toVersion\\": \\"2\\",
-    \\"entityName\\": \\"User\\",
-    \\"fingerprint\\": \\"abc123\\",
-    \\"itemCounts\\": {
-      \\"scanned\\": 100,
-      \\"migrated\\": 100,
-      \\"skipped\\": 0,
-      \\"failed\\": 0
+    "id": "20260501083042-User-add-status",
+    "schemaVersion": 1,
+    "kind": "transform",
+    "status": "applied",
+    "appliedAt": "2026-05-01T08:30:42Z",
+    "fromVersion": "1",
+    "toVersion": "2",
+    "entityName": "User",
+    "fingerprint": "abc123",
+    "itemCounts": {
+      "scanned": 100,
+      "migrated": 100,
+      "skipped": 0,
+      "failed": 0
     }
   }
 ]
