@@ -1,7 +1,6 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import type { Command } from 'commander';
 import { createMigrationsClient } from '../../client/index.js';
-import { c } from '../output/colors.js';
 import { EXIT_CODES } from '../output/exit-codes.js';
 import { log } from '../output/log.js';
 import { createSpinner } from '../output/spinner.js';
@@ -70,7 +69,11 @@ export async function runApply(args: RunApplyArgs): Promise<void> {
   // Step 4: summary (RUN-09) is written to stderr by client.apply() itself.
   // The programmatic client emits the "Next steps" checklist so it is visible
   // regardless of whether the operator invokes via CLI or programmatic API.
-  spinner.success(c.ok(`Applied ${result.applied.length} migration${result.applied.length === 1 ? '' : 's'}.`));
+  // We deliberately do NOT call spinner.success() here — the multi-line
+  // summary the client just wrote is the canonical confirmation, and adding
+  // a redundant one-liner after it produces awkward output (and may overwrite
+  // portions of the summary if the spinner library uses cursor manipulation).
+  spinner.stop();
 }
 
 /** Register the `apply` subcommand. */

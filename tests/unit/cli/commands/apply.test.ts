@@ -118,16 +118,17 @@ describe('runApply (RUN-06/07/09)', () => {
     expect(fakeClient.history).not.toHaveBeenCalled();
   });
 
-  it('A-2: single migration success — spinner success message written to stderr; RUN-09 summary emitted by client.apply()', async () => {
+  it('A-2: single migration success — CLI suppresses redundant success line; RUN-09 summary owned by client.apply()', async () => {
     vi.mocked(resolveCliConfig).mockResolvedValue({
       config: STUB_CONFIG as never,
       configPath: '/fake/config.ts',
       cwd: '/fake',
     });
-    // The mocked client.apply() returns the applied list; the real client.apply()
-    // also writes the RUN-09 summary to stderr. Unit tests mock the client, so the
-    // summary comes from the mock's return — the integration test in
-    // apply-happy-path-1k.test.ts pins the actual stderr content end-to-end.
+    // WR-06: the CLI no longer writes its own one-line "Applied N migrations"
+    // success message. The RUN-09 summary is owned by the programmatic client
+    // so it shows up regardless of CLI vs programmatic invocation. Unit tests
+    // mock the client so no summary is emitted from the mock; integration
+    // tests pin the actual stderr summary content.
     const fakeClient = makeClient({
       apply: vi.fn().mockResolvedValue({
         applied: [{ migId: 'mig-1', itemCounts: { scanned: 100, migrated: 100, skipped: 0, failed: 0 } }],
@@ -144,10 +145,13 @@ describe('runApply (RUN-06/07/09)', () => {
     await runApply({ cwd: '/fake' });
 
     const stderr = stderrChunks.join('');
-    // Spinner success message is written by the CLI.
-    expect(stderr).toContain('Applied 1 migration');
+    // The CLI must NOT emit a redundant "Applied N migration" headline — the
+    // programmatic client owns the summary. WR-06 explicitly suppresses this.
+    expect(stderr).not.toContain('Applied 1 migration');
     // history() is no longer called by the CLI (the programmatic client handles the summary).
     expect(fakeClient.history).not.toHaveBeenCalled();
+    // client.apply() must have been called with the resolved migrationId (or no args).
+    expect(fakeClient.apply).toHaveBeenCalledTimes(1);
   });
 
   it('A-3: RUN-06 sequence rejection — EDB_NOT_NEXT_PENDING: message+remediation on stderr, exits USER_ERROR', async () => {
