@@ -117,6 +117,13 @@ function makeRunnerEntityStub(captured: RunnerCaptured[], pagesQueue: Array<Arra
           entry.set = { ...(entry.set ?? {}), ...values };
           return chain;
         },
+        // remove() and where() are used by finalizeFlow's post-loop lock clear.
+        remove(_attrs: string[]) {
+          return chain;
+        },
+        where(_condition: unknown) {
+          return chain;
+        },
         go: vi.fn(async () => {
           captured.push(entry);
           return { data: null };

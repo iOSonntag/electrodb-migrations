@@ -61,6 +61,13 @@ vi.mock('../../../src/state-mutations/index.js', () => ({
   transitionToReleaseMode: mockTransitionToReleaseMode,
 }));
 
+// applyFlowScanWrite now calls service.migrations.put() to ensure the _migrations row
+// exists before transitionToReleaseMode patches it. Mock the MIGRATIONS_SCHEMA_VERSION
+// constant so the import doesn't pull real DB code into the unit test bundle.
+vi.mock('../../../src/internal-entities/index.js', () => ({
+  MIGRATIONS_SCHEMA_VERSION: 1,
+}));
+
 vi.mock('../../../src/runner/sleep.js', () => ({
   sleep: mockSleep,
 }));
@@ -108,10 +115,33 @@ function makeMigration(
   return {
     id: 'test-migration-id',
     entityName: 'User',
-    from: { scan: { go: scanGo } },
-    to: { put: (r: unknown) => ({ params: () => r as Record<string, unknown> }) },
+    from: { scan: { go: scanGo }, model: { version: '1' } },
+    to: { put: (r: unknown) => ({ params: () => r as Record<string, unknown> }), model: { version: '2' } },
     up: upFn ?? (async (r: unknown) => ({ ...(r as object), __v: 2 })),
     scanGo,
+  };
+}
+
+/**
+ * Build a minimal service stub for apply-flow unit tests.
+ *
+ * applyFlowScanWrite now calls `service.migrations.put(record).go()` to ensure
+ * the `_migrations` row exists before transitionToReleaseMode patches it.
+ * applyFlow's catch block also calls `service.migrations.patch(key).set(values).go()`
+ * to mark the migration failed. Both chains are stubbed here.
+ */
+function makeServiceStub() {
+  const migrationsPutGoFn = vi.fn(async () => ({ data: null }));
+  const migrationsPatchGoFn = vi.fn(async () => ({ data: null }));
+  return {
+    migrations: {
+      put: vi.fn((_record: unknown) => ({ go: migrationsPutGoFn })),
+      patch: vi.fn((_key: unknown) => ({
+        set: vi.fn((_values: unknown) => ({ go: migrationsPatchGoFn })),
+      })),
+    },
+    _migrationsPutGoFn: migrationsPutGoFn,
+    _migrationsPatchGoFn: migrationsPatchGoFn,
   };
 }
 
@@ -124,7 +154,7 @@ function makeArgs(
 ) {
   const migration = makeMigration(overrides.pages, overrides.up);
   return {
-    service: {} as never,
+    service: makeServiceStub() as never,
     config: makeConfig(overrides.acquireWaitMs),
     client: {} as never,
     tableName: 'test-table',
