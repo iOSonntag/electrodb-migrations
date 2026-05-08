@@ -2,10 +2,10 @@ import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-import { wrapClient } from '../guard/index.js';
+import { wrapClient, runUnguarded } from '../guard/index.js';
 import { readLockRow } from '../lock/index.js';
 import { createMigrationsService } from '../internal-entities/index.js';
-import { applyBatch, finalizeFlow, loadPendingMigrations, type HistoryRow, type RawHistoryRow, type ItemCounts } from '../runner/index.js';
+import { applyBatch, finalizeFlow, loadPendingMigrations, renderApplySummary, type HistoryRow, type RawHistoryRow, type ItemCounts } from '../runner/index.js';
 import { clear } from '../state-mutations/index.js';
 import type { CreateMigrationsClientArgs, MigrationsClient } from './types.js';
 
@@ -60,19 +60,58 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
   const cwd = args.cwd ?? process.cwd();
 
   // Step 4: build the guarded client for the user's app-time DDB calls.
-  // The guarded client uses the SAME underlying docClient but adds middleware
-  // that blocks writes (or all ops) when a migration lock is active.
-  // The runner uses the UNGUARDED `docClient` via `bundle`.
+  //
+  // NOTE (T-04-11-03): `wrapClient` adds guard middleware to `docClient.middlewareStack`
+  // in place. `DynamoDBDocumentClient` shares its middleware stack with the underlying
+  // `DynamoDBClient`, so ALL clients sharing the same underlying raw client (including
+  // `bundle`'s internal DDB calls) go through the guard middleware.
+  //
+  // The recursion hazard: the guard reads the lock row via `readLockRow(bundle)` which
+  // calls through the same guarded middleware → infinite recursion. The fix lives in
+  // `wrap.ts`: `fetchLockState` runs inside an `AsyncLocalStorage` bypass context so
+  // the guard passes through its own lock-row read without recursing.
   const guarded = wrapClient({
     client: docClient,
     config: args.config,
     internalService: bundle,
   }) as DynamoDBDocumentClient;
 
+  /**
+   * Resolve the pending migration list.
+   *
+   * When `args.migrations` is provided (programmatic shortcut — useful in Lambda
+   * harnesses where bundlers strip the `migrations/` directory), convert each
+   * `Migration` object to a `PendingMigration` and skip disk discovery entirely.
+   * Otherwise, fall back to `loadPendingMigrations` (disk walk + status scan).
+   */
+  async function resolvePending(): Promise<import('../runner/load-pending.js').PendingMigration[]> {
+    if (args.migrations !== undefined && args.migrations.length > 0) {
+      // Convert pre-loaded Migration objects to PendingMigration shape.
+      // `path` is synthetic (not a real file path) since disk was bypassed.
+      const list = args.migrations.map((mig) => ({
+        id: mig.id,
+        entityName: mig.entityName,
+        fromVersion: (mig.from as unknown as { model: { version: string } }).model.version,
+        toVersion: (mig.to as unknown as { model: { version: string } }).model.version,
+        migration: mig,
+        path: `[programmatic:${mig.id}]`,
+      }));
+      // Sort ascending by (entityName, fromVersion) — same contract as loadPendingMigrations.
+      list.sort((a, b) => {
+        if (a.entityName !== b.entityName) return a.entityName < b.entityName ? -1 : 1;
+        return Number.parseInt(a.fromVersion, 10) - Number.parseInt(b.fromVersion, 10);
+      });
+      return list;
+    }
+    return loadPendingMigrations({ config: args.config, service: bundle, cwd });
+  }
+
   const client: MigrationsClient = {
     async apply(callArgs) {
+      return runUnguarded(async () => {
       const runId = randomUUID();
-      const pending = await loadPendingMigrations({ config: args.config, service: bundle, cwd });
+      const startedAt = Date.now();
+      const pending = await resolvePending();
       const result = await applyBatch({
         service: bundle,
         config: args.config,
@@ -83,13 +122,38 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
         runId,
         holder,
       });
+
+      // RUN-09 — write the apply success summary to stderr so operators see
+      // the "Run `electrodb-migrations release`" checklist regardless of
+      // whether they invoke via CLI or programmatic client.
+      if (result.applied.length > 0) {
+        const elapsedMs = Date.now() - startedAt;
+        const history = (await bundle.migrations.scan.go({ pages: 'all' } as never)) as {
+          data: RawHistoryRow[];
+        };
+        const entries = result.applied.map((a) => {
+          const row = history.data.find((h) => h.id === a.migId);
+          return {
+            id: a.migId,
+            entityName: row?.entityName ?? 'unknown',
+            fromVersion: row?.fromVersion ?? '?',
+            toVersion: row?.toVersion ?? '?',
+            itemCounts: a.itemCounts,
+          };
+        });
+        const summary = renderApplySummary({ migrations: entries, totalElapsedMs: elapsedMs });
+        process.stderr.write(summary);
+      }
+
       return { applied: result.applied };
+      }); // end runUnguarded
     },
 
     async finalize(arg) {
+      return runUnguarded(async () => {
       if (typeof arg === 'string') {
         const runId = randomUUID();
-        const pending = await loadPendingMigrations({ config: args.config, service: bundle, cwd });
+        const pending = await resolvePending();
         const target = pending.find((p) => p.id === arg);
         if (!target) {
           throw new Error(`Migration '${arg}' not found in ${args.config.migrations}.`);
@@ -112,7 +176,7 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
       const finalized: { migId: string; itemCounts: ItemCounts }[] = [];
       for (const row of appliedRows) {
         const runId = randomUUID();
-        const pending = await loadPendingMigrations({ config: args.config, service: bundle, cwd });
+        const pending = await resolvePending();
         const target = pending.find((p) => p.id === row.id);
         if (!target) continue; // disk migration not found — skip (operator alert)
         const result = await finalizeFlow({
@@ -127,50 +191,61 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
         finalized.push({ migId: row.id, itemCounts: result.itemCounts });
       }
       return { finalized };
+      }); // end runUnguarded
     },
 
     async release() {
-      const row = await readLockRow(bundle);
-      if (!row || row.lockState === 'free') {
-        return { cleared: false, reason: 'no-active-release-lock' };
-      }
-      if (row.lockState !== 'release') {
-        const err: Error & { code?: string; remediation?: string } = new Error(
-          `release refused — lock is in '${row.lockState}' state, not 'release'.`,
-        );
-        err.code = 'EDB_RELEASE_PREMATURE';
-        err.remediation = `Wait for the active operation to complete, or run \`unlock --run-id ${row.lockRunId ?? '<unknown>'}\` if the runner is dead.`;
-        throw err;
-      }
-      if (!row.lockRunId) {
-        throw new Error('release refused — release-mode lock missing lockRunId (corrupted state).');
-      }
-      await clear(bundle, { runId: row.lockRunId });
-      return { cleared: true };
+      // runUnguarded: readLockRow and clear use the bundle which shares the guarded
+      // middleware stack; bypass is required so they can execute when lock is in release state.
+      return runUnguarded(async () => {
+        const row = await readLockRow(bundle);
+        if (!row || row.lockState === 'free') {
+          return { cleared: false, reason: 'no-active-release-lock' };
+        }
+        if (row.lockState !== 'release') {
+          const err: Error & { code?: string; remediation?: string } = new Error(
+            `release refused — lock is in '${row.lockState}' state, not 'release'.`,
+          );
+          err.code = 'EDB_RELEASE_PREMATURE';
+          err.remediation = `Wait for the active operation to complete, or run \`unlock --run-id ${row.lockRunId ?? '<unknown>'}\` if the runner is dead.`;
+          throw err;
+        }
+        if (!row.lockRunId) {
+          throw new Error('release refused — release-mode lock missing lockRunId (corrupted state).');
+        }
+        await clear(bundle, { runId: row.lockRunId });
+        return { cleared: true };
+      });
     },
 
     async history(filter) {
-      const all = (await bundle.migrations.scan.go({ pages: 'all' })) as { data: RawHistoryRow[] };
-      const rows: HistoryRow[] = all.data.map((r) => {
-        const { reads, ...rest } = r;
-        const readsArr = reads === undefined ? undefined : [...reads].sort();
-        return { ...rest, ...(readsArr !== undefined ? { reads: readsArr } : {}) } as HistoryRow;
-      });
-      return filter?.entity !== undefined ? rows.filter((r) => r.entityName === filter.entity) : rows;
-    },
-
-    async status() {
-      const lock = await readLockRow(bundle);
-      const all = (await bundle.migrations.scan.go({ pages: 'all' })) as { data: RawHistoryRow[] };
-      const recent = all.data
-        .map((r): HistoryRow => {
+      // runUnguarded: bundle scan may be called while lock is in a gating state.
+      return runUnguarded(async () => {
+        const all = (await bundle.migrations.scan.go({ pages: 'all' })) as { data: RawHistoryRow[] };
+        const rows: HistoryRow[] = all.data.map((r) => {
           const { reads, ...rest } = r;
           const readsArr = reads === undefined ? undefined : [...reads].sort();
           return { ...rest, ...(readsArr !== undefined ? { reads: readsArr } : {}) } as HistoryRow;
-        })
-        .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)) // descending by id (newest first)
-        .slice(0, 10);
-      return { lock, recent };
+        });
+        return filter?.entity !== undefined ? rows.filter((r) => r.entityName === filter.entity) : rows;
+      });
+    },
+
+    async status() {
+      // runUnguarded: readLockRow + bundle scan use the shared guarded middleware stack.
+      return runUnguarded(async () => {
+        const lock = await readLockRow(bundle);
+        const all = (await bundle.migrations.scan.go({ pages: 'all' })) as { data: RawHistoryRow[] };
+        const recent = all.data
+          .map((r): HistoryRow => {
+            const { reads, ...rest } = r;
+            const readsArr = reads === undefined ? undefined : [...reads].sort();
+            return { ...rest, ...(readsArr !== undefined ? { reads: readsArr } : {}) } as HistoryRow;
+          })
+          .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)) // descending by id (newest first)
+          .slice(0, 10);
+        return { lock, recent };
+      });
     },
 
     guardedClient() {

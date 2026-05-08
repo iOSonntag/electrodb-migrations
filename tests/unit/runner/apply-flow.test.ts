@@ -108,8 +108,8 @@ function makeMigration(
   return {
     id: 'test-migration-id',
     entityName: 'User',
-    from: { scan: { go: scanGo } },
-    to: { put: (r: unknown) => ({ params: () => r as Record<string, unknown> }) },
+    from: { scan: { go: scanGo }, model: { version: '1' } },
+    to: { put: (r: unknown) => ({ params: () => r as Record<string, unknown> }), model: { version: '2' } },
     up: upFn ?? (async (r: unknown) => ({ ...(r as object), __v: 2 })),
     scanGo,
   };
@@ -123,8 +123,14 @@ function makeArgs(
   } = {},
 ) {
   const migration = makeMigration(overrides.pages, overrides.up);
+  // Minimal stub service — must include migrations.upsert so applyFlowScanWrite
+  // can create the _migrations row (Plan 08 prerequisite).
+  const mockUpsert = vi.fn(() => ({ go: vi.fn(async () => ({})) }));
+  const service = {
+    migrations: { upsert: mockUpsert },
+  } as never;
   return {
-    service: {} as never,
+    service,
     config: makeConfig(overrides.acquireWaitMs),
     client: {} as never,
     tableName: 'test-table',

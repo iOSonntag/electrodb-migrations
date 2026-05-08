@@ -1,7 +1,6 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import type { Command } from 'commander';
 import { createMigrationsClient } from '../../client/index.js';
-import { type MigrationSummaryEntry, renderApplySummary } from '../../runner/index.js';
 import { c } from '../output/colors.js';
 import { EXIT_CODES } from '../output/exit-codes.js';
 import { log } from '../output/log.js';
@@ -52,7 +51,6 @@ export async function runApply(args: RunApplyArgs): Promise<void> {
     args.migrationId !== undefined ? `Applying ${args.migrationId}...` : 'Applying pending migrations...',
   );
   spinner.start();
-  const startedAt = Date.now();
   let result: Awaited<ReturnType<typeof client.apply>>;
   try {
     result = await client.apply(
@@ -62,7 +60,6 @@ export async function runApply(args: RunApplyArgs): Promise<void> {
     spinner.error('Apply failed.');
     throw err;
   }
-  const elapsedMs = Date.now() - startedAt;
 
   if (result.applied.length === 0) {
     spinner.stop();
@@ -70,23 +67,10 @@ export async function runApply(args: RunApplyArgs): Promise<void> {
     return;
   }
 
+  // Step 4: summary (RUN-09) is written to stderr by client.apply() itself.
+  // The programmatic client emits the "Next steps" checklist so it is visible
+  // regardless of whether the operator invokes via CLI or programmatic API.
   spinner.success(c.ok(`Applied ${result.applied.length} migration${result.applied.length === 1 ? '' : 's'}.`));
-
-  // Step 4: render the success summary via history join.
-  const history = await client.history();
-  const entries: MigrationSummaryEntry[] = result.applied.map((a) => {
-    const row = history.find((h) => h.id === a.migId);
-    return {
-      id: a.migId,
-      entityName: row?.entityName ?? 'unknown',
-      fromVersion: row?.fromVersion ?? '?',
-      toVersion: row?.toVersion ?? '?',
-      itemCounts: a.itemCounts,
-    };
-  });
-  const summary = renderApplySummary({ migrations: entries, totalElapsedMs: elapsedMs });
-  // Summary goes to stderr (operator-facing, not machine-readable).
-  process.stderr.write(summary);
 }
 
 /** Register the `apply` subcommand. */

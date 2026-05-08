@@ -23,6 +23,7 @@ vi.mock('../../../src/runner/index.js', () => ({
   applyBatch: vi.fn(),
   finalizeFlow: vi.fn(),
   loadPendingMigrations: vi.fn(),
+  renderApplySummary: vi.fn(() => ''),
 }));
 
 vi.mock('../../../src/lock/index.js', () => ({
@@ -61,6 +62,8 @@ vi.mock('../../../src/guard/index.js', () => ({
   createLockStateCache: vi.fn(),
   isReadCommand: vi.fn(),
   GATING_LOCK_STATES: new Set(),
+  // runUnguarded: bypass context — in tests, just call fn() directly.
+  runUnguarded: vi.fn((fn: () => Promise<unknown>) => fn()),
 }));
 
 // ---------------------------------------------------------------------------
