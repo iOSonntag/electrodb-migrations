@@ -1,0 +1,15 @@
+// Pattern: name every symbol explicitly; never `export *`.
+// This barrel exposes runner-public symbols to src/client/ — they are
+// NOT re-exported from src/index.ts (internal-only).
+export { applyFlow, applyFlowScanWrite, type ApplyFlowArgs, type ApplyFlowResult } from './apply-flow.js';
+export { applyBatch, type ApplyBatchArgs, type ApplyBatchResult } from './apply-batch.js';
+export { finalizeFlow, type FinalizeFlowArgs, type FinalizeFlowResult } from './finalize-flow.js';
+export { loadPendingMigrations, isNextPending, type PendingMigration, type LoadPendingMigrationsArgs } from './load-pending.js';
+export { loadMigrationFile, EDBMigrationLoadError } from './load-migration-module.js';
+export { iterateV1Records, type IterateV1RecordsOptions } from './scan-pipeline.js';
+export { batchFlushV2, type BatchFlushArgs } from './batch-flush.js';
+export { createCountAudit, type CountAudit, type ItemCounts } from './count-audit.js';
+export { renderApplySummary, type ApplySummaryArgs, type MigrationSummaryEntry } from './apply-summary.js';
+export { formatHistoryJson, type HistoryRow, type RawHistoryRow, type FormatHistoryJsonOptions } from './history-format.js';
+export { transitionReleaseToApply, type TransitionReleaseToApplyArgs } from './transition-release-to-apply.js';
+export { sleep } from './sleep.js';

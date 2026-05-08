@@ -55,7 +55,9 @@ vi.mock('../../../src/internal-entities/index.js', () => ({
 }));
 
 vi.mock('../../../src/guard/index.js', () => ({
-  wrapClient: vi.fn((docClient: unknown, _args: unknown) => docClient),
+  // wrapClient takes WrapClientArgs = { client, config, internalService }
+  // and returns the (mutated) client. Our mock returns the client from args.
+  wrapClient: vi.fn((wrapArgs: { client: unknown }) => wrapArgs.client),
   createLockStateCache: vi.fn(),
   isReadCommand: vi.fn(),
   GATING_LOCK_STATES: new Set(),
@@ -130,7 +132,7 @@ function makeConfig(tableName: string | (() => string) | undefined = 'test-table
 
 /** Build a stub MigrationsServiceBundle. */
 function makeStubBundle() {
-  const migrationsScanGo = vi.fn(async () => ({ data: [] }));
+  const migrationsScanGo = vi.fn(async (_opts?: unknown) => ({ data: [] as Record<string, unknown>[] }));
   return {
     service: { transaction: { write: vi.fn() } },
     migrations: {
@@ -205,22 +207,16 @@ describe('CMC-2 — tableName resolution (W-01 pinned)', () => {
   it('uses explicit tableName arg when provided (wins over config)', () => {
     const client = createMigrationsClient(makeClientArgs({ tableName: 'override-table' }));
     expect(client).toBeDefined();
-    // service was constructed with 'override-table'
-    expect(createMigrationsService).toHaveBeenCalledWith(
-      expect.anything(),
-      'override-table',
-      expect.anything(),
-    );
+    // service was constructed with 'override-table' (2nd positional arg)
+    const firstCall = createMigrationsService.mock.calls[0];
+    expect(firstCall?.[1]).toBe('override-table');
   });
 
   it('uses config.tableName string when no explicit arg', () => {
     const client = createMigrationsClient(makeClientArgs({ config: makeConfig('config-table') }));
     expect(client).toBeDefined();
-    expect(createMigrationsService).toHaveBeenCalledWith(
-      expect.anything(),
-      'config-table',
-      expect.anything(),
-    );
+    const firstCall = createMigrationsService.mock.calls[0];
+    expect(firstCall?.[1]).toBe('config-table');
   });
 
   it('calls config.tableName() thunk and uses result', () => {
@@ -228,15 +224,19 @@ describe('CMC-2 — tableName resolution (W-01 pinned)', () => {
     const client = createMigrationsClient(makeClientArgs({ config: makeConfig(thunk) }));
     expect(client).toBeDefined();
     expect(thunk).toHaveBeenCalled();
-    expect(createMigrationsService).toHaveBeenCalledWith(
-      expect.anything(),
-      'thunk-table',
-      expect.anything(),
-    );
+    const firstCall = createMigrationsService.mock.calls[0];
+    expect(firstCall?.[1]).toBe('thunk-table');
   });
 
   it('throws plain Error (not a typed EDB class) with required substrings when tableName is missing', () => {
-    const args = makeClientArgs({ config: makeConfig(undefined) });
+    // Create a config with no tableName explicitly — cannot use makeConfig(undefined)
+    // because that triggers the TypeScript/JS default parameter and sets 'test-table'.
+    const configWithoutTableName = {
+      ...makeConfig('test-table'),
+      tableName: undefined,
+    } as import('../../../src/config/index.js').ResolvedConfig;
+    const args = makeClientArgs({ config: configWithoutTableName });
+    // The factory should throw synchronously (before any DDB calls)
     expect(() => createMigrationsClient(args)).toThrow(
       /createMigrationsClient: tableName is required.*set config\.tableName or pass tableName arg/,
     );
@@ -414,12 +414,12 @@ describe('CMC-7 — release() lock-state coverage (W-04 exhaustive)', () => {
 
   // CMC-7d..h: exhaustive EDB_RELEASE_PREMATURE cases
   it.each([
-    ['apply', 'CMC-7d'],
-    ['finalize', 'CMC-7e'],
-    ['rollback', 'CMC-7f'],
-    ['failed', 'CMC-7g'],
-    ['dying', 'CMC-7h'],
-  ] as const)('%s state → throws EDB_RELEASE_PREMATURE (%s)', async (lockState) => {
+    ['apply'],
+    ['finalize'],
+    ['rollback'],
+    ['failed'],
+    ['dying'],
+  ] as const)('%s state → throws EDB_RELEASE_PREMATURE', async ([lockState]) => {
     readLockRow.mockResolvedValue({
       id: 'state', schemaVersion: 1, updatedAt: '', lockState, lockRunId: 'run-xyz',
     } as never);

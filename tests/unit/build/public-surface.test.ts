@@ -19,6 +19,8 @@ const EXPECTED_RUNTIME_KEYS = [
   'defineConfig',
   // Phase 2: migration factory (the Migration type export does NOT appear at runtime)
   'defineMigration',
+  // Phase 4: programmatic client factory (API-01, API-02)
+  'createMigrationsClient',
 ];
 
 const FORBIDDEN_RUNTIME_KEYS = [
