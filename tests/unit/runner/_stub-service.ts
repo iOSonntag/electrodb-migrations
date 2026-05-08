@@ -158,7 +158,18 @@ export interface RunnerStubService {
     migrationRuns: ReturnType<typeof makeRunnerEntityStub>;
   };
   captured: RunnerCaptured[];
-  setScanPages: (pages: Array<Array<Record<string, unknown>>>) => void;
+  /**
+   * Enqueue scan pages.
+   *
+   * Two accepted shapes:
+   *   - `Array<Array<Record>>` — pages-of-pages targeting the `migrationState` queue
+   *     (default scan target for scan-pipeline / apply-flow tests).
+   *   - `Array<Record>` — flat row list targeting the `migrations` queue as a
+   *     SINGLE page (used by load-pending tests that scan `_migrations`).
+   */
+  setScanPages: (
+    pages: Array<Array<Record<string, unknown>>> | Array<Record<string, unknown>>,
+  ) => void;
   setGetResult: (result: { data: Record<string, unknown> | null }) => void;
   batchWriteSendSpy: ReturnType<typeof vi.fn>;
   /**
@@ -175,6 +186,11 @@ export interface RunnerStubService {
     from: { scan: { go: ReturnType<typeof vi.fn> } };
     to: { put: (record: unknown) => { params: () => Record<string, unknown> } };
   };
+  /**
+   * Alias for `service.migrations.scan.go` — exposed for load-pending tests
+   * that need to assert scan-call counts directly.
+   */
+  scanGoSpy: ReturnType<typeof vi.fn>;
 }
 
 /**
@@ -253,12 +269,25 @@ export function makeRunnerStubService(): RunnerStubService {
     service: service as RunnerStubService['service'],
     captured,
     setScanPages: (pages) => {
-      // Default: enqueue on migrationState queue (primary scan target for runner tests).
-      migrationStatePagesQueue.length = 0;
-      for (const page of pages) {
-        migrationStatePagesQueue.push(page);
+      // Detect shape: pages-of-pages (Array<Array<Record>>) vs flat rows (Array<Record>).
+      // Flat rows feed the migrations queue as a single page (load-pending convention).
+      if (pages.length === 0) {
+        migrationStatePagesQueue.length = 0;
+        migrationsPagesQueue.length = 0;
+        return;
+      }
+      const first = pages[0];
+      if (Array.isArray(first)) {
+        migrationStatePagesQueue.length = 0;
+        for (const page of pages as Array<Array<Record<string, unknown>>>) {
+          migrationStatePagesQueue.push(page);
+        }
+      } else {
+        migrationsPagesQueue.length = 0;
+        migrationsPagesQueue.push(pages as Array<Record<string, unknown>>);
       }
     },
+    scanGoSpy: migrations.scan.go as ReturnType<typeof vi.fn>,
     setGetResult: (result) => {
       getResult = result;
     },
