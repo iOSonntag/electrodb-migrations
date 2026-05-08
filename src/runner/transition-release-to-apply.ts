@@ -1,10 +1,10 @@
 import { MIGRATION_STATE_ID, type MigrationsServiceBundle } from '../internal-entities/index.js';
 
 /**
- * Inputs for {@link transitionReleaseToApply}. The `migId` field is carried
- * for call-site symmetry with `appendInFlight` but is not read by this
- * verb — Plan 09 calls `appendInFlight` before this verb to advance
- * `lockMigrationId` + `inFlightIds`.
+ * Inputs for {@link transitionReleaseToApply}. The `migId` field names the
+ * migration that is about to enter `apply` state — `appendInFlight` (called
+ * immediately before this verb) sets `lockMigrationId = migId`, and this
+ * verb's WHERE clause asserts that invariant before flipping the state.
  */
 export interface TransitionReleaseToApplyArgs {
   runId: string;
@@ -16,7 +16,16 @@ export interface TransitionReleaseToApplyArgs {
  *
  * Single-entity patch — flips `lockState='release' → 'apply'` and refreshes
  * `heartbeatAt` so the runner's heartbeat scheduler resumes from a fresh
- * mark. ConditionExpression: `lockRunId = :runId AND lockState = 'release'`.
+ * mark. ConditionExpression: `lockRunId = :runId AND lockState = 'release'
+ * AND lockMigrationId = :migId`.
+ *
+ * The `lockMigrationId = :migId` clause provides defense in depth: it pins
+ * the transition to the migration that `appendInFlight` just advanced the
+ * lock to. If a maintainer ever reorders the `appendInFlight` /
+ * `transitionReleaseToApply` call pair, or if an operator manually patches
+ * `lockMigrationId` between the two calls, the WHERE clause fails closed
+ * via `ConditionalCheckFailedException` rather than silently transitioning
+ * with a stale `lockMigrationId`.
  *
  * **Internal:** sole caller is `src/runner/apply-batch.ts`. NOT re-exported
  * from `src/index.ts`. Promoted to `src/state-mutations/` only when more
@@ -38,8 +47,8 @@ export async function transitionReleaseToApply(
   await service.migrationState
     .patch({ id: MIGRATION_STATE_ID })
     .set({ lockState: 'apply', heartbeatAt: now, updatedAt: now })
-    .where(({ lockRunId, lockState }, op) =>
-      `${op.eq(lockRunId, args.runId)} AND ${op.eq(lockState, 'release')}`,
+    .where(({ lockRunId, lockState, lockMigrationId }, op) =>
+      `${op.eq(lockRunId, args.runId)} AND ${op.eq(lockState, 'release')} AND ${op.eq(lockMigrationId, args.migId)}`,
     )
     .go();
 }
