@@ -136,7 +136,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. The CTX integration tests cover the four declared/undeclared × in-bounds/out-of-bounds combinations and all pass against DynamoDB Local in under 30 seconds.
 **Plans**: 6 plans across 6 waves
   - [x] 06-01-PLAN.md — Wave 0: spike test (entity-clone via `new Entity(schema, config)`) + 2 fixtures (User-reads-Team, User-self-read) + RED tests for CTX-01..06 + CTX-08 + ctx source-scan invariant (no `setClient` in src/ctx/) — gates Wave 1 until spike passes
-  - [ ] 06-02-PLAN.md — Wave 1: src/ctx/types.ts (MigrationCtx + ReadOnlyEntityFacade<E>) + src/ctx/read-only-facade.ts (createReadOnlyFacade with 6 read methods + 7 write traps) — CTX-02, CTX-03
+  - [x] 06-02-PLAN.md — Wave 1: src/ctx/types.ts (MigrationCtx + ReadOnlyEntityFacade<E>) + src/ctx/read-only-facade.ts (createReadOnlyFacade with 6 read methods + 7 write traps) — CTX-02, CTX-03
   - [ ] 06-03-PLAN.md — Wave 2: src/ctx/build-ctx.ts (eager-for-declared + lazy-for-undeclared validation) + src/ctx/index.ts barrel + apply-flow + apply-batch + client.apply cwd plumbing — CTX-01, CTX-04, CTX-05, CTX-06
   - [ ] 06-04-PLAN.md — Wave 3: rollback orchestrator + strategy executors retrofitted to thread ctx through migration.down(record, ctx) per RESEARCH §A6 + RollbackArgs.cwd + client.rollback wiring — CTX-01 (down-side)
   - [ ] 06-05-PLAN.md — Wave 4: ROLLBACK_REASON_CODES.READS_DEPENDENCY_APPLIED + checkPreconditions Step 10 (CTX-08) using fromVersion comparison (clock-skew safe per RESEARCH §A3) — CTX-08
