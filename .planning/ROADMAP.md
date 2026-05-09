@@ -152,7 +152,14 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. After branch B is rebased on a main that landed branch A's User migration, `npx electrodb-migrations create --regenerate <id>` rewrites `v1.ts` and `v2.ts` to the new "previous" shape and the current entity, preserves the user's `up()`/`down()` code byte-for-byte, advances the migration's `from`/`to` versions, and prints the new schema diff.
   4. `npx electrodb-migrations acknowledge-removal User` advances the framework's snapshot to record User as intentionally removed, does not touch any DDB records, and a subsequent `validate` exits zero.
   5. Frozen `v1.ts`/`v2.ts` files are integrity-hashed at scaffold time (hash stored alongside the snapshot) and `validate` re-checks each hash; manually editing either file flips the corresponding rule to `frozen-snapshot-edited` failure.
-**Plans**: TBD
+**Plans**: 7 plans across 6 waves
+  - [ ] 07-01-PLAN.md — Wave 0: test infrastructure + fixture builders + RED tests for all 8 rules + entityRemovedTombstonePath helper + perf-test scaffold — VAL-01..10, SCF-08, CLI-02 (test-side)
+  - [ ] 07-02-PLAN.md — Wave 1: src/validate/{types,context,run-rules,index}.ts + 8 rule stub files (frozen registry order; Pitfall 1 + Pitfall 7 pinned) — VAL-09 (registry foundation)
+  - [ ] 07-03-PLAN.md — Wave 2A: rules VAL-01..04 (drift-without-migration / version-skew / sequence-gaps / parallel-branch-collision); pure-function bodies — VAL-01, VAL-02, VAL-03, VAL-04
+  - [ ] 07-04-PLAN.md — Wave 2B: rules VAL-05..08 (cross-entity-ordering / removed-entities / reserved-namespace / frozen-snapshot-edited); parallel with 07-03 — VAL-05, VAL-06, VAL-07, VAL-08
+  - [ ] 07-05-PLAN.md — Wave 3: src/scaffold/regenerate.ts (SC-3 byte-equal migration.ts; Pitfall 5 find-by-id) + src/scaffold/acknowledge-removal.ts (tombstone with journal+live-entity guards) + ERROR_CODES additions — SCF-08, VAL-10
+  - [ ] 07-06-PLAN.md — Wave 4: CLI wiring — src/cli/commands/validate.ts (with --json) + acknowledge-removal.ts + create.ts --regenerate dispatch + src/cli/program.ts + src/cli/index.ts lazy-imports — VAL-09, VAL-10, SCF-08, CLI-02
+  - [ ] 07-07-PLAN.md — Wave 5: SC-1 perf gate (< 1000ms on 20-entity/40-migration fixture) + exit-code smoke (SC-2 all-8-rules) + README updates §1/§4.12/§4.13/§4 create --regenerate/§11 — VAL-09 (full coverage)
 
 ### Phase 8: Test Harness
 **Goal**: Users can write framework-agnostic unit tests for migrations under `electrodb-migrations/testing` that exercise `up()`, `down()`, and `rollbackResolver` with type inference from `migration.from`/`migration.to`, schema-validated outputs, and three case shapes — published as a separate sub-path export with correct `tsup` build wiring.
@@ -203,7 +210,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 4. Apply, Release & Finalize Runner | 16/16 | Complete | 2026-05-09 |
 | 5. Rollback Strategies | 11/11 | Complete | 2026-05-09 |
 | 6. Cross-Entity Reads | 6/6 | Complete | 2026-05-09 |
-| 7. Validate, Regenerate & Acknowledge-Removal | 0/TBD | Not started | - |
+| 7. Validate, Regenerate & Acknowledge-Removal | 0/7 | Not started | - |
 | 8. Test Harness | 0/TBD | Not started | - |
 | 9. Remote Execution | 0/TBD | Not started | - |
 | 10. Build, Quality & v0.1.0 Release | 0/TBD | Not started | - |
