@@ -31,3 +31,6 @@ export {
   type TypeTableCounts,
   type ClassifyTypeTableArgs,
 } from './type-table.js';
+
+// Case 1 (pre-release) rollback flow (RBK-03)
+export { rollbackCase1, type RollbackCase1Args, type RollbackCase1Result } from './case-1-flow.js';

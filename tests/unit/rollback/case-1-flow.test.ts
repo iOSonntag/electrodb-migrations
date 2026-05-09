@@ -50,8 +50,8 @@ describe('rollbackCase1 (RBK-03 — pre-release rollback by v2 delete)', () => {
     const audit = createRollbackAudit();
 
     const result = await rollbackCase1({
-      migration: migration as Parameters<typeof rollbackCase1>[0]['migration'],
-      client: stub.client as Parameters<typeof rollbackCase1>[0]['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
     });
@@ -79,8 +79,8 @@ describe('rollbackCase1 (RBK-03 — pre-release rollback by v2 delete)', () => {
     stub.batchWriteSendSpy.mockResolvedValue({ UnprocessedItems: undefined });
 
     await rollbackCase1({
-      migration: migration as Parameters<typeof rollbackCase1>[0]['migration'],
-      client: stub.client as Parameters<typeof rollbackCase1>[0]['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
     });
@@ -104,8 +104,8 @@ describe('rollbackCase1 (RBK-03 — pre-release rollback by v2 delete)', () => {
     stub.batchWriteSendSpy.mockResolvedValue({ UnprocessedItems: undefined });
 
     await rollbackCase1({
-      migration: migration as Parameters<typeof rollbackCase1>[0]['migration'],
-      client: stub.client as Parameters<typeof rollbackCase1>[0]['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
     });
@@ -133,8 +133,8 @@ describe('rollbackCase1 (RBK-03 — pre-release rollback by v2 delete)', () => {
     stub.batchWriteSendSpy.mockResolvedValue({ UnprocessedItems: undefined });
 
     await rollbackCase1({
-      migration: migration as Parameters<typeof rollbackCase1>[0]['migration'],
-      client: stub.client as Parameters<typeof rollbackCase1>[0]['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
     });
@@ -164,8 +164,8 @@ describe('rollbackCase1 (RBK-03 — pre-release rollback by v2 delete)', () => {
     // no spy on migration.down is needed (undefined property = no accessor).
     await expect(
       rollbackCase1({
-        migration: migration as Parameters<typeof rollbackCase1>[0]['migration'],
-        client: stub.client as Parameters<typeof rollbackCase1>[0]['client'],
+        migration: migration as never,
+        client: stub.client as never,
         tableName: 'test-table',
         audit,
       }),
@@ -185,8 +185,8 @@ describe('rollbackCase1 (RBK-03 — pre-release rollback by v2 delete)', () => {
     stub.batchWriteSendSpy.mockResolvedValue({ UnprocessedItems: undefined });
 
     await rollbackCase1({
-      migration: migration as Parameters<typeof rollbackCase1>[0]['migration'],
-      client: stub.client as Parameters<typeof rollbackCase1>[0]['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
     });
@@ -208,8 +208,8 @@ describe('rollbackCase1 (RBK-03 — pre-release rollback by v2 delete)', () => {
     const audit = createRollbackAudit();
 
     await rollbackCase1({
-      migration: migration as Parameters<typeof rollbackCase1>[0]['migration'],
-      client: stub.client as Parameters<typeof rollbackCase1>[0]['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
     });
@@ -228,8 +228,8 @@ describe('rollbackCase1 (RBK-03 — pre-release rollback by v2 delete)', () => {
     const audit = createRollbackAudit();
 
     await rollbackCase1({
-      migration: migration as Parameters<typeof rollbackCase1>[0]['migration'],
-      client: stub.client as Parameters<typeof rollbackCase1>[0]['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
       pageSize: 25,
@@ -253,8 +253,8 @@ describe('rollbackCase1 (RBK-03 — pre-release rollback by v2 delete)', () => {
 
     await expect(
       rollbackCase1({
-        migration: migration as Parameters<typeof rollbackCase1>[0]['migration'],
-        client: stub.client as Parameters<typeof rollbackCase1>[0]['client'],
+        migration: migration as never,
+        client: stub.client as never,
         tableName: 'test-table',
         audit,
       }),
@@ -276,8 +276,8 @@ describe('rollbackCase1 (RBK-03 — pre-release rollback by v2 delete)', () => {
     stub.batchWriteSendSpy.mockResolvedValue({ UnprocessedItems: undefined });
 
     const result = await rollbackCase1({
-      migration: migration as Parameters<typeof rollbackCase1>[0]['migration'],
-      client: stub.client as Parameters<typeof rollbackCase1>[0]['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
     });
