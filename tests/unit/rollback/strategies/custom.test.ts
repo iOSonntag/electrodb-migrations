@@ -25,6 +25,7 @@ import type { TypeTableEntry } from '../../../../src/rollback/type-table.js';
 import { createRollbackAudit } from '../../../../src/rollback/audit.js';
 import { executeCustom, type ExecuteCustomArgs } from '../../../../src/rollback/strategies/custom.js';
 import { makeRollbackStubService } from '../_stub-service.js';
+import type { MigrationCtx } from '../../../../src/ctx/types.js';
 
 // ---------------------------------------------------------------------------
 // Test helper: build an AsyncGenerator from a fixed array of TypeTableEntries
@@ -72,6 +73,16 @@ function entryC(id = 'u-3'): TypeTableEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Shared fake ctx (Phase 6 / CTX-01 retrofit)
+// ---------------------------------------------------------------------------
+
+function makeFakeCtx(): MigrationCtx {
+  return {
+    entity: vi.fn(() => { throw new Error('test should not call ctx.entity'); }) as never,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main test suite
 // ---------------------------------------------------------------------------
 
@@ -102,6 +113,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await executeCustom(args);
@@ -136,6 +148,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await executeCustom(args);
@@ -171,6 +184,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await executeCustom(args);
@@ -200,6 +214,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await executeCustom(args);
@@ -248,6 +263,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await executeCustom(args);
@@ -276,6 +292,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await executeCustom(args);
@@ -305,6 +322,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await expect(executeCustom(args)).rejects.toThrow('resolver-boom');
@@ -345,6 +363,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await expect(executeCustom(args)).rejects.toThrow(domainKey);
@@ -371,6 +390,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await executeCustom(args);
@@ -399,6 +419,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await expect(executeCustom(args)).rejects.toThrow();
@@ -429,6 +450,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await executeCustom(args);
@@ -462,6 +484,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await executeCustom(args);
@@ -493,6 +516,7 @@ describe('executeCustom (RBK-08)', () => {
       client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
+      ctx: makeFakeCtx(),
     };
 
     await executeCustom(args);
@@ -502,5 +526,51 @@ describe('executeCustom (RBK-08)', () => {
     expect(callArgs).toHaveProperty('kind', 'C');
     expect(callArgs.v2).toBeUndefined();
     expect(callArgs).toHaveProperty('v1Original');
+  });
+
+  // --------------------------------------------------------------------------
+  // Case 14: CTX-01 — custom strategy passes a ctx-bound down to the resolver (Pitfall 4)
+  // --------------------------------------------------------------------------
+
+  it('passes a ctx-bound down to the resolver (CTX-01, Pitfall 4)', async () => {
+    const audit = createRollbackAudit();
+    const migration = stubSvc.makeMigration({ hasDown: true, hasRollbackResolver: true });
+    const fakeCtx: MigrationCtx = { entity: vi.fn() as never };
+
+    // Track calls to migration.down to assert (record, ctx) was received
+    const migrationDownSpy = vi.fn(async (record: unknown, _ctx?: unknown) => {
+      const r = record as Record<string, unknown>;
+      const { status: _s, ...v1Shape } = r;
+      return v1Shape;
+    });
+    (migration as Record<string, unknown>).down = migrationDownSpy;
+
+    // Resolver simulates calling down(v2) with ONE arg (the one-arg contract)
+    const resolverSpy = vi.fn(async (resolverArgs: unknown) => {
+      const a = resolverArgs as { down?: (r: unknown) => Promise<unknown>; v2?: unknown };
+      if (!a.down || !a.v2) return null;
+      // Resolver calls down with ONE arg — the bound version closes over ctx
+      return await a.down(a.v2);
+    });
+    (migration as Record<string, unknown>).rollbackResolver = resolverSpy;
+
+    const entry = entryB('u-ctx-bound');
+
+    const args: ExecuteCustomArgs = {
+      classify: makeClassify([entry]),
+      migration: migration as never,
+      client: stubSvc.client as never,
+      tableName: 'test-table',
+      audit,
+      ctx: fakeCtx,
+    };
+
+    await executeCustom(args);
+
+    expect(resolverSpy).toHaveBeenCalledTimes(1);
+    expect(migrationDownSpy).toHaveBeenCalledTimes(1);
+    // migration.down received TWO args: (v2Record, fakeCtx)
+    // despite the resolver calling down with only ONE arg
+    expect(migrationDownSpy.mock.calls[0]).toEqual([expect.any(Object), fakeCtx]);
   });
 });

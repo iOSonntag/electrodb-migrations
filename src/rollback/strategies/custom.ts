@@ -47,6 +47,7 @@ import { validateResolverResult } from '../resolver-validate.js';
 import type { RollbackAudit } from '../audit.js';
 import type { TypeTableEntry } from '../type-table.js';
 import type { AnyElectroEntity, Migration, RollbackResolverArgs } from '../../migrations/index.js';
+import type { MigrationCtx } from '../../ctx/types.js';
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -66,6 +67,17 @@ export interface ExecuteCustomArgs {
   tableName: string;
   /** Rollback audit accumulator (mutated in place). */
   audit: RollbackAudit;
+  /**
+   * Phase 6 / CTX-01 — the cross-entity reads ctx. Bound into a one-arg `down` closure
+   * passed to `migration.rollbackResolver` so the resolver can call `down(v2)` with one
+   * argument while the underlying `migration.down(record, ctx)` always receives ctx.
+   *
+   * **Pitfall 4 (RESEARCH lines 569-573):** Phase 5 omitted this field; user
+   * `down()` functions that called `ctx.entity(...)` in the rollback path crashed.
+   * Phase 6 fixes this by binding ctx at the call site in `executeCustom` so the
+   * resolver's one-arg `down` contract is preserved.
+   */
+  ctx: MigrationCtx;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,11 +149,24 @@ export async function executeCustom(args: ExecuteCustomArgs): Promise<void> {
   const puts: Record<string, unknown>[] = [];
   const v1Deletes: Record<string, unknown>[] = [];
 
+  // Phase 6 / CTX-01 — bind ctx into a one-arg `down` so the resolver can call
+  // `down(v2)` per the README §2.2.4 documented contract without needing to
+  // know ctx exists. The bound version closes over args.ctx so the underlying
+  // `migration.down(record, ctx)` always sees the orchestrator-built ctx.
+  //
+  // **Pitfall 4 (RESEARCH §A6):** Do NOT pass migration.down directly — that
+  // would omit ctx and break user down() functions that call ctx.entity(...).
+  // **Pitfall (plan note):** If migration.down is undefined, boundDown must be
+  // undefined too — do not replace with a function that throws.
+  const boundDown = migration.down !== undefined
+    ? (record: unknown, _ctx?: unknown) => migration.down!(record, args.ctx)
+    : undefined;
+
   for await (const entry of classify) {
     audit.incrementScanned();
 
     // Step 1: Build resolver args (only fields present for this entry's type).
-    const resolverArgs = buildResolverArgs(entry, migration.down);
+    const resolverArgs = buildResolverArgs(entry, boundDown);
 
     // Step 2: Invoke the user-supplied resolver.
     let resolverResult: unknown;
