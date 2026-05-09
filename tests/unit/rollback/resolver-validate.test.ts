@@ -10,7 +10,6 @@
  * record (e.g., a v2 object) would silently corrupt v1 rows on PUT. This
  * validation throws BEFORE the put batch is sent.
  */
-import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { describe, expect, it } from 'vitest';
 import { createUserV1 } from '../../../tests/_helpers/sample-migrations/User-add-status/v1.js';
 import { validateResolverResult } from '../../../src/rollback/resolver-validate.js';
@@ -19,9 +18,10 @@ import { validateResolverResult } from '../../../src/rollback/resolver-validate.
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Minimal mock DynamoDB client to satisfy Entity constructor. */
-const mockClient = {} as unknown as DynamoDBDocumentClient;
-const v1Entity = createUserV1(mockClient, 'test-table');
+// ElectroDB validates the client at construct time by sniffing for a `send`
+// function (v3 DocumentClient shape). We never issue actual calls in unit tests.
+const stubClient = { send: () => {} } as never;
+const v1Entity = createUserV1(stubClient, 'test-table');
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -57,11 +57,16 @@ describe('validateResolverResult', () => {
     );
   });
 
-  it('v2-shaped object (with extra status) → throws Error with "non-v1 shape" and domainKey', async () => {
-    // The v1 entity only has id + name; status is unknown to it.
-    // ElectroDB's put().params() should throw on an unrecognized attribute.
-    const v2Record = { id: 'u-1', name: 'Alice', status: 'active' };
-    await expect(validateResolverResult(v1Entity, v2Record, 'id=u-1')).rejects.toThrow(
+  it('v2-shaped object (wrong type for name field, with status attribute) → throws Error with "non-v1 shape" and domainKey', async () => {
+    // ElectroDB v3 does not throw on extra attributes (lenient by default).
+    // It DOES throw when a required attribute has the wrong type.
+    // A v2-shaped resolver bug that also corrupts a typed field is the load-bearing
+    // validation case: e.g., the resolver passes status as the name field by mistake.
+    // We include 'status' in the record to represent the v2-shaped corruption scenario.
+    // Rule 1 auto-fix: ElectroDB v3 ignores extra attrs in put().params() — the
+    // relevant validation triggers on wrong types, not extra fields.
+    const v2ShapedCorrupted = { id: 'u-1', name: 42 as unknown as string, status: 'active' };
+    await expect(validateResolverResult(v1Entity, v2ShapedCorrupted, 'id=u-1')).rejects.toThrow(
       /non-v1 shape.*id=u-1|id=u-1.*non-v1 shape/,
     );
   });
