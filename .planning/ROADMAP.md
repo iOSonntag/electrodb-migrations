@@ -19,7 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Internal Entities, Lock & Guard** - DDB I/O moat: three internal entities with the five field additions, `Service` wrapper, lock acquire/heartbeat/takeover/transition, guard wrapper with `ConsistentRead: true` + fail-closed + per-process cache + eventual-consistency mock ✓ completed 2026-05-08 (602/602 unit + 45/45 integration tests, BLD-04 cornerstone proven, all 4 BLOCKER review findings resolved)
 - [x] **Phase 4: Apply, Release & Finalize Runner** - Happy-path runner: scan v1 records, run `up()`, write v2, transition to release-mode, multi-migration handoff, finalize under maintenance-mode lock; CLI commands `apply`/`release`/`finalize`/`status`/`history` plus blocking programmatic client ✓ completed 2026-05-09 (16/16 plans, 763/763 unit + 60/62 integration tests; BL-01 audit-row regression pinned by 04-15; 2 pre-existing integration failures tracked as DI-04-15-01/02)
 - [x] **Phase 5: Rollback Strategies** - Head-only rollback for Cases 1/2/3, four strategies (`projected`/`snapshot`/`fill-only`/`custom`), `rollbackResolver`, refusal cases with reason codes, single-table-design type-table classification using ElectroDB identity stamps, `unlock` command ✓ completed 2026-05-09 (11/11 plans, 957/957 unit + 41/41 Phase-5 integration tests; 2 pre-existing failures DI-04-15-01/02 from Phase 4 unchanged)
-- [ ] **Phase 6: Cross-Entity Reads** - `ctx.entity(Other)` read-only proxy, `EDBStaleEntityReadError`, `EDBSelfReadInMigrationError`, `reads` declaration on `defineMigration`, persisted to `_migrations.reads`
+- [x] **Phase 6: Cross-Entity Reads** - `ctx.entity(Other)` read-only proxy, `EDBStaleEntityReadError`, `EDBSelfReadInMigrationError`, `reads` declaration on `defineMigration`, persisted to `_migrations.reads` ✓ completed 2026-05-09 (6/6 plans, 994/994 unit + 9/9 Phase-6 integration tests; gsd-verifier 5/5 SCs passed; spike-test HARD GATE confirmed `new Entity(schema, config)` clone strategy)
 - [ ] **Phase 7: Validate, Regenerate & Acknowledge-Removal** - CI gate `validate` with eight rules, `create --regenerate` for parallel-branch resolution, `acknowledge-removal` for entity retirement, frozen-snapshot integrity hashing
 - [ ] **Phase 8: Test Harness** - `electrodb-migrations/testing` sub-path: `testMigration` (forward, round-trip, schema-only cases), `testRollbackResolver` (kind A/B/C cases), schema-validated outputs, framework-agnostic, `tsup` testing-entry build
 - [ ] **Phase 9: Remote Execution** - `createLambdaMigrationHandler`, HTTPS wire contract, `--remote` CLI flag with CLI-tier loop, `runInBackground`/`getRunStatus`, T-1min watchdog, pre-flight Scan COUNT estimate, sync vs async error shape split
@@ -202,7 +202,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 3. Internal Entities, Lock & Guard | 8/8 | Complete | 2026-05-08 |
 | 4. Apply, Release & Finalize Runner | 16/16 | Complete | 2026-05-09 |
 | 5. Rollback Strategies | 11/11 | Complete | 2026-05-09 |
-| 6. Cross-Entity Reads | 0/TBD | Not started | - |
+| 6. Cross-Entity Reads | 6/6 | Complete | 2026-05-09 |
 | 7. Validate, Regenerate & Acknowledge-Removal | 0/TBD | Not started | - |
 | 8. Test Harness | 0/TBD | Not started | - |
 | 9. Remote Execution | 0/TBD | Not started | - |
