@@ -116,10 +116,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   - [x] 05-02-PLAN.md — Wave 1: preconditions + lifecycle-case + head-only (TDD; refusal truth-table dispatch) — RBK-01, RBK-09, RBK-10
   - [x] 05-03-PLAN.md — Wave 1: identity-stamp utilities + type-table classifier + STD safety integration test (TDD) — RBK-04, RBK-11
   - [x] 05-04-PLAN.md — Wave 1: rollback audit + resolver-validate + heterogeneous batch-flush (TDD; the plumbing layer) — RBK-08 (partial), RBK-12
-  - [ ] 05-05-PLAN.md — Wave 2: strategy executors projected + fill-only (TDD; both require down) — RBK-05, RBK-07
-  - [ ] 05-06-PLAN.md — Wave 2: strategy executor snapshot + DATA-LOSS warning (TDD; B/C count prompt; --yes audit trail) — RBK-06
-  - [ ] 05-07-PLAN.md — Wave 2: strategy executor custom + rollbackResolver type tightening (TDD; per-record resolver dispatch; Pitfall 3 schema-validation) — RBK-08
-  - [ ] 05-08-PLAN.md — Wave 2: case-1 flow (TDD; pre-release v2-deletion path; lossless; no down required) — RBK-03
+  - [x] 05-05-PLAN.md — Wave 2: strategy executors projected + fill-only (TDD; both require down) — RBK-05, RBK-07
+  - [x] 05-06-PLAN.md — Wave 2: strategy executor snapshot + DATA-LOSS warning (TDD; B/C count prompt; --yes audit trail) — RBK-06
+  - [x] 05-07-PLAN.md — Wave 2: strategy executor custom + rollbackResolver type tightening (TDD; per-record resolver dispatch; Pitfall 3 schema-validation) — RBK-08
+  - [x] 05-08-PLAN.md — Wave 2: case-1 flow (TDD; pre-release v2-deletion path; lossless; no down required) — RBK-03
   - [ ] 05-09-PLAN.md — Wave 3: rollback orchestrator (lock-cycle wrapper + dispatch) + 7 integration tests (lock-cycle, case-1, projected, snapshot, fill-only, custom, audit-row-shape) — RBK-02, RBK-03..12
   - [ ] 05-10-PLAN.md — Wave 3: MigrationsClient API surface (rollback, forceUnlock, getLockState, getGuardState) + integration tests — API-05
   - [ ] 05-11-PLAN.md — Wave 4: CLI commands rollback + unlock (commander wiring + cli-table3 prompt + readline confirm) — CLI-05, CLI-06, CLI-07
