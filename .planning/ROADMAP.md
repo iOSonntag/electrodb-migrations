@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Drift Detection & Authoring Loop** - File-system-only CLI: `init`, `baseline`, `create` (with `v1.ts`/`v2.ts` emission, `model.version` bump, schema diff), drift kinds, scaffold templates, CLI plumbing (commander, picocolors, yocto-spinner, cli-table3, jiti) ✓ completed 2026-05-03 (395/395 tests, build green, CLI smokes)
 - [x] **Phase 3: Internal Entities, Lock & Guard** - DDB I/O moat: three internal entities with the five field additions, `Service` wrapper, lock acquire/heartbeat/takeover/transition, guard wrapper with `ConsistentRead: true` + fail-closed + per-process cache + eventual-consistency mock ✓ completed 2026-05-08 (602/602 unit + 45/45 integration tests, BLD-04 cornerstone proven, all 4 BLOCKER review findings resolved)
 - [x] **Phase 4: Apply, Release & Finalize Runner** - Happy-path runner: scan v1 records, run `up()`, write v2, transition to release-mode, multi-migration handoff, finalize under maintenance-mode lock; CLI commands `apply`/`release`/`finalize`/`status`/`history` plus blocking programmatic client ✓ completed 2026-05-09 (16/16 plans, 763/763 unit + 60/62 integration tests; BL-01 audit-row regression pinned by 04-15; 2 pre-existing integration failures tracked as DI-04-15-01/02)
-- [ ] **Phase 5: Rollback Strategies** - Head-only rollback for Cases 1/2/3, four strategies (`projected`/`snapshot`/`fill-only`/`custom`), `rollbackResolver`, refusal cases with reason codes, single-table-design type-table classification using ElectroDB identity stamps, `unlock` command
+- [x] **Phase 5: Rollback Strategies** - Head-only rollback for Cases 1/2/3, four strategies (`projected`/`snapshot`/`fill-only`/`custom`), `rollbackResolver`, refusal cases with reason codes, single-table-design type-table classification using ElectroDB identity stamps, `unlock` command ✓ completed 2026-05-09 (11/11 plans, 957/957 unit + 41/41 Phase-5 integration tests; 2 pre-existing failures DI-04-15-01/02 from Phase 4 unchanged)
 - [ ] **Phase 6: Cross-Entity Reads** - `ctx.entity(Other)` read-only proxy, `EDBStaleEntityReadError`, `EDBSelfReadInMigrationError`, `reads` declaration on `defineMigration`, persisted to `_migrations.reads`
 - [ ] **Phase 7: Validate, Regenerate & Acknowledge-Removal** - CI gate `validate` with eight rules, `create --regenerate` for parallel-branch resolution, `acknowledge-removal` for entity retirement, frozen-snapshot integrity hashing
 - [ ] **Phase 8: Test Harness** - `electrodb-migrations/testing` sub-path: `testMigration` (forward, round-trip, schema-only cases), `testRollbackResolver` (kind A/B/C cases), schema-validated outputs, framework-agnostic, `tsup` testing-entry build
@@ -195,7 +195,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. Drift Detection & Authoring Loop | 9/9 | Complete | 2026-05-03 |
 | 3. Internal Entities, Lock & Guard | 8/8 | Complete | 2026-05-08 |
 | 4. Apply, Release & Finalize Runner | 16/16 | Complete | 2026-05-09 |
-| 5. Rollback Strategies | 0/11 | Planned | - |
+| 5. Rollback Strategies | 11/11 | Complete | 2026-05-09 |
 | 6. Cross-Entity Reads | 0/TBD | Not started | - |
 | 7. Validate, Regenerate & Acknowledge-Removal | 0/TBD | Not started | - |
 | 8. Test Harness | 0/TBD | Not started | - |
