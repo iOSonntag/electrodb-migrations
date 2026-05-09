@@ -99,7 +99,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. `npx electrodb-migrations apply --migration <id>` for an id that is not the next pending sequence position rejects with a friendly error naming the actual next id; `apply` with no pending migrations exits zero with "no migrations to apply".
   4. `npx electrodb-migrations release` clears the release-mode lock when no `inFlightIds` remain; running it again is a friendly idempotent no-op; `npx electrodb-migrations finalize <id>` deletes all v1 records under maintenance-mode lock (app traffic unaffected, verified by guarded read going through), marks the migration `finalized`, and clears the lock.
   5. `npx electrodb-migrations status` prints the current `lockState`, `lockHolder`, `lockRunId`, `heartbeatAt`, and per-migration progress in a `cli-table3` table; `npx electrodb-migrations history --json` emits the full `_migrations` log as machine-readable JSON suitable for piping to `jq`.
-**Plans**: TBD
+**Plans**: 16 plans across 5 waves (complete — see `.planning/phases/04-apply-release-finalize-runner/`)
 
 ### Phase 5: Rollback Strategies
 **Goal**: A user can run `npx electrodb-migrations rollback <id>` against the head migration and recover from any of the three lifecycle cases, choosing among four strategies (`projected`, `snapshot`, `fill-only`, `custom`) with explicit refusal cases when a strategy is impossible — and recover from a stuck lock via `unlock`.
@@ -111,7 +111,18 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Post-release rollback with `--strategy snapshot` prints the explicit type-B and type-C counts and prompts for confirmation before proceeding; `--strategy fill-only` runs `down(v2)` only for type B and leaves originals for A and C; `--strategy custom` invokes the user-supplied `rollbackResolver` per record with `{kind, v1Original, v2, down}` and respects `null` returns as deletes.
   4. Post-finalize rollback with `--strategy snapshot` or `--strategy fill-only` rejects with `EDBRollbackNotPossibleError({reason: 'FINALIZED_ONLY_PROJECTED'})`; rollback of a non-head migration rejects with `EDBRollbackOutOfOrderError` naming the offending later migration; `--strategy projected` without `down` defined rejects with `EDBRollbackNotPossibleError({reason: 'NO_DOWN_FUNCTION'})`; `--strategy custom` without `rollbackResolver` rejects with `EDBRollbackNotPossibleError({reason: 'NO_RESOLVER'})`.
   5. `npx electrodb-migrations unlock --run-id <runId>` requires `--run-id` even with `--yes`; the interactive prompt shows `lockState`, `lockHolder`, `lockRunId`, `heartbeatAt`, and elapsed runtime before confirmation; clearing a `lockState='apply'` lock marks the migration `failed`, clearing a `lockState='release'` lock is equivalent to `release`, and clearing a `lockState='finalize'` lock marks the finalize `failed`.
-**Plans**: TBD
+**Plans**: 11 plans across 5 waves
+  - [ ] 05-01-PLAN.md — Wave 0: test-infrastructure (4 fixture migrations, 2 seed helpers, integration bootstrap, unit stub, EDBRollbackCountMismatchError, source-scan glob extension to src/rollback/) — RBK-12
+  - [ ] 05-02-PLAN.md — Wave 1: preconditions + lifecycle-case + head-only (TDD; refusal truth-table dispatch) — RBK-01, RBK-09, RBK-10
+  - [ ] 05-03-PLAN.md — Wave 1: identity-stamp utilities + type-table classifier + STD safety integration test (TDD) — RBK-04, RBK-11
+  - [ ] 05-04-PLAN.md — Wave 1: rollback audit + resolver-validate + heterogeneous batch-flush (TDD; the plumbing layer) — RBK-08 (partial), RBK-12
+  - [ ] 05-05-PLAN.md — Wave 2: strategy executors projected + fill-only (TDD; both require down) — RBK-05, RBK-07
+  - [ ] 05-06-PLAN.md — Wave 2: strategy executor snapshot + DATA-LOSS warning (TDD; B/C count prompt; --yes audit trail) — RBK-06
+  - [ ] 05-07-PLAN.md — Wave 2: strategy executor custom + rollbackResolver type tightening (TDD; per-record resolver dispatch; Pitfall 3 schema-validation) — RBK-08
+  - [ ] 05-08-PLAN.md — Wave 2: case-1 flow (TDD; pre-release v2-deletion path; lossless; no down required) — RBK-03
+  - [ ] 05-09-PLAN.md — Wave 3: rollback orchestrator (lock-cycle wrapper + dispatch) + 7 integration tests (lock-cycle, case-1, projected, snapshot, fill-only, custom, audit-row-shape) — RBK-02, RBK-03..12
+  - [ ] 05-10-PLAN.md — Wave 3: MigrationsClient API surface (rollback, forceUnlock, getLockState, getGuardState) + integration tests — API-05
+  - [ ] 05-11-PLAN.md — Wave 4: CLI commands rollback + unlock (commander wiring + cli-table3 prompt + readline confirm) — CLI-05, CLI-06, CLI-07
 
 ### Phase 6: Cross-Entity Reads
 **Goal**: A migration's `up()` and `down()` can read related entities through a runner-injected `ctx.entity(Other)` proxy that is bound to the unguarded client, enforces read-only access, blocks self-reads, and validates on-disk shape against the imported source before issuing the read.
@@ -184,7 +195,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. Drift Detection & Authoring Loop | 9/9 | Complete | 2026-05-03 |
 | 3. Internal Entities, Lock & Guard | 8/8 | Complete | 2026-05-08 |
 | 4. Apply, Release & Finalize Runner | 16/16 | Complete | 2026-05-09 |
-| 5. Rollback Strategies | 0/TBD | Not started | - |
+| 5. Rollback Strategies | 0/11 | Planned | - |
 | 6. Cross-Entity Reads | 0/TBD | Not started | - |
 | 7. Validate, Regenerate & Acknowledge-Removal | 0/TBD | Not started | - |
 | 8. Test Harness | 0/TBD | Not started | - |
