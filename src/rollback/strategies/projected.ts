@@ -28,6 +28,7 @@ import type { TypeTableEntry } from '../type-table.js';
 import type { RollbackAudit } from '../audit.js';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import type { Migration, AnyElectroEntity } from '../../migrations/index.js';
+import type { MigrationCtx } from '../../ctx/types.js';
 
 // ---------------------------------------------------------------------------
 // Shared strategy argument shape
@@ -44,6 +45,17 @@ export interface ExecuteStrategyArgs {
   tableName: string;
   /** Rollback audit accumulator (from Plan 05-04). */
   audit: RollbackAudit;
+  /**
+   * Phase 6 / CTX-01 — the cross-entity reads ctx. Forwarded to `migration.down(record, ctx)`
+   * so user `down()` functions can call `ctx.entity(Other).get(...)`. Built by the
+   * orchestrator via `buildCtx(...)` and threaded through.
+   *
+   * **Pitfall 4 (RESEARCH lines 569-573):** Phase 5 omitted this field; user
+   * `down()` functions that called `ctx.entity(...)` in the rollback path crashed
+   * with "Cannot read properties of undefined (reading 'entity')". Phase 6 fixes
+   * this by passing the orchestrator-built ctx.
+   */
+  ctx: MigrationCtx;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,7 +82,7 @@ export async function executeProjected(args: ExecuteStrategyArgs): Promise<void>
       // RESEARCH Pattern 5 — down throw bubbles after audit.failed++ (mirrors apply-flow up-throw bubble).
       let v1Derived: unknown;
       try {
-        v1Derived = await args.migration.down!(entry.v2!);
+        v1Derived = await args.migration.down!(entry.v2!, args.ctx);
       } catch (err) {
         args.audit.incrementFailed();
         throw err; // RUN-08 fail-fast equivalent for rollback
