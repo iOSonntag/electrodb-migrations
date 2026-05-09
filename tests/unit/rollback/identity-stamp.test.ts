@@ -175,9 +175,9 @@ describe('extractDomainKey', () => {
     expect(extractDomainKey(multiEntity, rawRecord)).toBe('tenantId=t-1&id=u-1');
   });
 
-  it('reads from user-domain shape via entity.parse (not from byte-level pk/sk)', () => {
-    // Verify by passing a record with different pk/sk but correct domain attrs.
-    // The key should reflect user-domain attribute values, not the pk/sk bytes.
+  it('reads composite attribute values directly from the record (not from byte-level pk/sk)', () => {
+    // Verify by passing a record with correct domain attrs.
+    // The key should reflect composite attribute values, not the pk/sk bytes.
     const record = makeUserV1Record({ id: 'u-999' });
     const key = extractDomainKey(userV1, record);
     expect(key).toBe('id=u-999');

@@ -44,38 +44,43 @@ export function classifyOwner(
 }
 
 /**
- * Extract the user-domain primary-key string for a raw DDB record.
+ * Extract the user-domain primary-key string for an ElectroDB scan record.
  *
  * Reads `entity.schema.indexes.byId.pk.composite` (an array of attribute
  * names, e.g. `['id']` or `['tenantId', 'id']`) and projects the
- * corresponding values from `entity.parse({Item: record}).data` — the
- * user-domain shape after ElectroDB unmarshals the record.
+ * corresponding values from the record.
+ *
+ * **Important:** ElectroDB's `entity.scan.go()` returns records already in
+ * user-domain shape (pk/sk bytes and `__edb_e__`/`__edb_v__` stamps are NOT
+ * present). The composite attribute values are accessible directly on the
+ * record object. Do NOT call `entity.parse({Item: record})` on scan output —
+ * that API is for raw DDB marshalled items (with `{S: "value"}` format).
  *
  * The key is `attribute=value` pairs joined by `&` (e.g., `'id=u-1'` or
  * `'tenantId=t-1&id=u-1'`).
  *
- * **Independence from pk/sk byte sequences (RBK-11):** The function reads
- * attribute values from the PARSED domain shape, not from the raw pk/sk
- * bytes. This means the key is stable across v1 and v2 entities that share
- * the same PK composite attribute list — the union key is consistent even
- * when the byte-level pk/sk differ (B-01 key-shape differentiator).
+ * **Independence from pk/sk byte sequences (RBK-11):** The composite
+ * attribute names come from the entity schema, so the key is stable across
+ * v1 and v2 entities that share the same PK composite attribute list — even
+ * when their byte-level pk/sk differ (B-01 key-shape differentiator).
  *
  * **Pitfall 7 / OQ6:** If v1 and v2 entities define DIFFERENT pk composite
  * attribute lists, this function may produce an incorrect union key. That
  * case is deferred to Phase 7's validate gate (a new VAL rule will refuse
  * such migrations). See RESEARCH OQ6 disposition.
  *
- * @param entity  - ElectroDB Entity (frozen v1 or frozen v2) — provides schema + parse.
- * @param record  - Raw DynamoDB Item (marshalled).
+ * @param entity  - ElectroDB Entity (frozen v1 or frozen v2) — provides schema.
+ * @param record  - User-domain record from `entity.scan.go()`.
  * @returns Deterministic domain-key string, e.g. `'id=u-1'`.
  */
 export function extractDomainKey(
   entity: AnyElectroEntity,
   record: Record<string, unknown>,
 ): string {
-  // biome-ignore lint/suspicious/noExplicitAny: schema/parse not in d.ts
+  // biome-ignore lint/suspicious/noExplicitAny: schema not fully in d.ts
   const e = entity as any;
   const composite: string[] = e.schema.indexes.byId.pk.composite;
-  const parsed = e.parse({ Item: record }).data as Record<string, unknown>;
-  return composite.map((f) => `${f}=${String(parsed[f])}`).join('&');
+  // Records from entity.scan.go() are already in user-domain shape —
+  // composite attribute values are directly accessible on the record.
+  return composite.map((f) => `${f}=${String(record[f])}`).join('&');
 }

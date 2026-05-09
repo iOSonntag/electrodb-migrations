@@ -19,7 +19,7 @@
 import { describe, expect, it } from 'vitest';
 import { CONSISTENT_READ } from '../../../src/safety/index.js';
 import { classifyTypeTable, type TypeTableEntry } from '../../../src/rollback/type-table.js';
-import { makeRollbackStubService } from '../_stub-service.js';
+import { makeRollbackStubService } from './_stub-service.js';
 
 // ---------------------------------------------------------------------------
 // Helpers to build stub records
