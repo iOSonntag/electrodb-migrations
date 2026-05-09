@@ -31,3 +31,6 @@ export {
   type TypeTableCounts,
   type ClassifyTypeTableArgs,
 } from './type-table.js';
+
+// Rollback strategy executors (Wave 2)
+export { executeSnapshot, type ExecuteSnapshotArgs } from './strategies/snapshot.js';

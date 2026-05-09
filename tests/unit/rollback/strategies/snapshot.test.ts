@@ -15,7 +15,7 @@
  *   skipped = a + c (proceed) or a + b + c (abort).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { executeSnapshot, type ExecuteSnapshotArgs } from '../../../../src/rollback/strategies/snapshot.js';
+import { executeSnapshot } from '../../../../src/rollback/strategies/snapshot.js';
 import { createRollbackAudit } from '../../../../src/rollback/audit.js';
 import { makeRollbackStubService } from '../_stub-service.js';
 import type { TypeTableEntry } from '../../../../src/rollback/type-table.js';
@@ -93,8 +93,8 @@ describe('executeSnapshot', () => {
 
     await executeSnapshot({
       classify: entriesGenerator([]),
-      migration,
-      client: stub.client as ExecuteSnapshotArgs['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
       yes: false,
@@ -130,8 +130,8 @@ describe('executeSnapshot', () => {
 
     await executeSnapshot({
       classify: entriesGenerator(entries),
-      migration,
-      client: stub.client as ExecuteSnapshotArgs['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
       yes: false,
@@ -171,8 +171,8 @@ describe('executeSnapshot', () => {
 
     await executeSnapshot({
       classify: entriesGenerator(entries),
-      migration,
-      client: stub.client as ExecuteSnapshotArgs['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
       yes: true,
@@ -223,8 +223,8 @@ describe('executeSnapshot', () => {
 
     await executeSnapshot({
       classify: entriesGenerator(entries),
-      migration,
-      client: stub.client as ExecuteSnapshotArgs['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
       yes: false,
@@ -240,7 +240,8 @@ describe('executeSnapshot', () => {
 
     // Prompt called once with a string containing [y/N].
     expect(confirmFn).toHaveBeenCalledTimes(1);
-    const promptArg = confirmFn.mock.calls[0][0] as string;
+    // biome-ignore lint/suspicious/noExplicitAny: test assertion — mock call args
+    const promptArg = (confirmFn.mock.calls[0] as any)[0] as string;
     expect(promptArg).toMatch(/\[y\/N\]/i);
 
     // Batch flush called.
@@ -270,8 +271,8 @@ describe('executeSnapshot', () => {
 
     await executeSnapshot({
       classify: entriesGenerator(entries),
-      migration,
-      client: stub.client as ExecuteSnapshotArgs['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
       yes: false,
@@ -311,8 +312,8 @@ describe('executeSnapshot', () => {
 
     await executeSnapshot({
       classify: entriesGenerator(entries),
-      migration,
-      client: stub.client as ExecuteSnapshotArgs['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
       yes: true,
@@ -357,8 +358,8 @@ describe('executeSnapshot', () => {
     await expect(
       executeSnapshot({
         classify: entriesGenerator(entries),
-        migration,
-        client: stub.client as ExecuteSnapshotArgs['client'],
+        migration: migration as never,
+        client: stub.client as never,
         tableName: 'test-table',
         audit,
         yes: true,
@@ -382,8 +383,8 @@ describe('executeSnapshot', () => {
 
     await executeSnapshot({
       classify: entriesGenerator(entries),
-      migration,
-      client: stub.client as ExecuteSnapshotArgs['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit,
       yes: true,
@@ -411,8 +412,8 @@ describe('executeSnapshot', () => {
     const confirmYesFalse = vi.fn().mockResolvedValue(true);
     await executeSnapshot({
       classify: entriesGenerator([...entries]),
-      migration,
-      client: stub.client as ExecuteSnapshotArgs['client'],
+      migration: migration as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit: auditFalse,
       yes: false,
@@ -426,8 +427,8 @@ describe('executeSnapshot', () => {
     const confirmYesTrue = vi.fn();
     await executeSnapshot({
       classify: entriesGenerator([...entries]),
-      migration: stub.makeMigration({ hasDown: false }),
-      client: stub.client as ExecuteSnapshotArgs['client'],
+      migration: stub.makeMigration({ hasDown: false }) as never,
+      client: stub.client as never,
       tableName: 'test-table',
       audit: auditTrue,
       yes: true,
