@@ -18,6 +18,8 @@ export interface BuildProgramOpts {
   registerFinalize?: (program: Command) => void;
   registerStatus?: (program: Command) => void;
   registerHistory?: (program: Command) => void;
+  registerRollback?: (program: Command) => void;
+  registerUnlock?: (program: Command) => void;
 }
 
 /**
@@ -46,6 +48,8 @@ export function buildProgram(opts: BuildProgramOpts = {}): Command {
   opts.registerFinalize?.(program);
   opts.registerStatus?.(program);
   opts.registerHistory?.(program);
+  opts.registerRollback?.(program);
+  opts.registerUnlock?.(program);
 
   return program;
 }

@@ -16,6 +16,10 @@ import { buildProgram } from './program.js';
  * release, finalize, status, history. All eight are lazy-imported here in
  * a single Promise.all — startup cost is bounded to the time of the slowest
  * import (sub-millisecond; none of the eight command files pull ts-morph).
+ *
+ * Phase 5 (Plan 05-11) adds rollback and unlock — two operator-path commands
+ * that complete Phase 5's CLI surface. Both follow the same lazy-import and
+ * registerXxxCommand pattern.
  */
 type Registrar = (program: import('commander').Command) => void;
 type CommandModule<K extends string> = Record<K, Registrar>;
@@ -47,6 +51,8 @@ async function main(): Promise<void> {
     registerFinalize,
     registerStatus,
     registerHistory,
+    registerRollback,
+    registerUnlock,
   ] = await Promise.all([
     tryImportRegistrar('./commands/init.js', 'registerInitCommand'),
     tryImportRegistrar('./commands/baseline.js', 'registerBaselineCommand'),
@@ -56,6 +62,8 @@ async function main(): Promise<void> {
     tryImportRegistrar('./commands/finalize.js', 'registerFinalizeCommand'),
     tryImportRegistrar('./commands/status.js', 'registerStatusCommand'),
     tryImportRegistrar('./commands/history.js', 'registerHistoryCommand'),
+    tryImportRegistrar('./commands/rollback.js', 'registerRollbackCommand'),
+    tryImportRegistrar('./commands/unlock.js', 'registerUnlockCommand'),
   ]);
 
   const program = buildProgram({
@@ -67,6 +75,8 @@ async function main(): Promise<void> {
     ...(registerFinalize ? { registerFinalize } : {}),
     ...(registerStatus ? { registerStatus } : {}),
     ...(registerHistory ? { registerHistory } : {}),
+    ...(registerRollback ? { registerRollback } : {}),
+    ...(registerUnlock ? { registerUnlock } : {}),
   });
 
   await program.parseAsync(process.argv);
