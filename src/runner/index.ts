@@ -10,6 +10,12 @@ export { iterateV1Records, type IterateV1RecordsOptions } from './scan-pipeline.
 export { batchFlushV2, type BatchFlushArgs } from './batch-flush.js';
 export { createCountAudit, type CountAudit, type ItemCounts } from './count-audit.js';
 export { renderApplySummary, type ApplySummaryArgs, type MigrationSummaryEntry } from './apply-summary.js';
-export { formatHistoryJson, type HistoryRow, type RawHistoryRow, type FormatHistoryJsonOptions } from './history-format.js';
+export {
+  formatHistoryJson,
+  normalizeHistoryRow,
+  type HistoryRow,
+  type RawHistoryRow,
+  type FormatHistoryJsonOptions,
+} from './history-format.js';
 export { transitionReleaseToApply, type TransitionReleaseToApplyArgs } from './transition-release-to-apply.js';
 export { sleep } from './sleep.js';

@@ -9,6 +9,7 @@ import {
   applyBatch,
   finalizeFlow,
   loadPendingMigrations,
+  normalizeHistoryRow,
   renderApplySummary,
   type HistoryRow,
   type ItemCounts,
@@ -315,11 +316,7 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
       // runUnguarded: bundle scan may be called while lock is in a gating state.
       return runUnguarded(async () => {
         const all = (await bundle.migrations.scan.go({ pages: 'all' })) as { data: RawHistoryRow[] };
-        const rows: HistoryRow[] = all.data.map((r) => {
-          const { reads, ...rest } = r;
-          const readsArr = reads === undefined ? undefined : [...reads].sort();
-          return { ...rest, ...(readsArr !== undefined ? { reads: readsArr } : {}) } as HistoryRow;
-        });
+        const rows: HistoryRow[] = all.data.map(normalizeHistoryRow);
         return filter?.entity !== undefined ? rows.filter((r) => r.entityName === filter.entity) : rows;
       });
     },
@@ -330,11 +327,7 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
         const lock = await readLockRow(bundle);
         const all = (await bundle.migrations.scan.go({ pages: 'all' })) as { data: RawHistoryRow[] };
         const recent = all.data
-          .map((r): HistoryRow => {
-            const { reads, ...rest } = r;
-            const readsArr = reads === undefined ? undefined : [...reads].sort();
-            return { ...rest, ...(readsArr !== undefined ? { reads: readsArr } : {}) } as HistoryRow;
-          })
+          .map(normalizeHistoryRow)
           .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)) // descending by id (newest first)
           .slice(0, 10);
         return { lock, recent };

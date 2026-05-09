@@ -46,6 +46,21 @@ export interface FormatHistoryJsonOptions {
 }
 
 /**
+ * Convert one raw `_migrations` row (Set-valued `reads`) into the
+ * canonical `HistoryRow` shape used by `history --json`, `history()` and
+ * `status()` (sorted-array `reads`).
+ *
+ * Centralised here (WR-10) so any future addition to the Set→array
+ * conversion (e.g. a new `failedIds` field) lands in a single place
+ * rather than three near-identical inlined blocks.
+ */
+export function normalizeHistoryRow(r: RawHistoryRow): HistoryRow {
+  const { reads, ...rest } = r;
+  const readsArr = reads === undefined ? undefined : [...reads].sort();
+  return { ...rest, ...(readsArr !== undefined ? { reads: readsArr } : {}) } as HistoryRow;
+}
+
+/**
  * Convert an array of `_migrations` rows to the `history --json` output.
  *
  * - Sorted ascending by `id` (timestamp-prefixed ids → chronological order).
@@ -64,11 +79,7 @@ export function formatHistoryJson(
 
   const sorted = [...filtered].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
-  const normalized: HistoryRow[] = sorted.map((r) => {
-    const { reads, ...rest } = r;
-    const readsArr = reads === undefined ? undefined : [...reads].sort();
-    return { ...rest, ...(readsArr !== undefined ? { reads: readsArr } : {}) } as HistoryRow;
-  });
+  const normalized: HistoryRow[] = sorted.map(normalizeHistoryRow);
 
   return `${JSON.stringify(normalized, null, 2)}\n`;
 }
