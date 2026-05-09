@@ -20,7 +20,6 @@
  * RESEARCH §Pattern 1, §OQ3, §OQ4.
  */
 import { describe, expect, it, vi } from 'vitest';
-// @ts-expect-error — Plan 06-03 ships src/ctx/build-ctx.ts; remove this directive when the file lands.
 import { buildCtx } from '../../../src/ctx/build-ctx.js';
 import { EDBSelfReadInMigrationError, EDBStaleEntityReadError } from '../../../src/errors/index.js';
 import { Entity } from 'electrodb';
@@ -152,30 +151,27 @@ describe('buildCtx', () => {
     });
 
     it('caches the validated facade — second ctx.entity() call does NOT re-read the snapshot', async () => {
-      const fs = await import('node:fs');
+      const { unlinkSync } = await import('node:fs');
       const client = makeStubDocClient();
       const teamEntity = makeRealEntity('Team', client);
       const dir = makeTempDir();
 
       // Write the CORRECT fingerprint
       const { fingerprint } = fingerprintEntityModel((teamEntity as unknown as { model: unknown }).model);
-      writeTestSnapshot(dir, 'Team', fingerprint);
+      const snapshotPath = writeTestSnapshot(dir, 'Team', fingerprint);
 
       const migration = makeMigration({ entityName: 'User' });
       const ctx = await buildCtx(migration, client, 'test-table', dir);
 
-      const fsSpy = vi.spyOn(fs, 'readFileSync');
-
-      // Call ctx.entity(Team) twice — the snapshot file should be read at most once
-      ctx.entity(teamEntity);
+      // First call primes the cache (reads and validates the snapshot file).
       ctx.entity(teamEntity);
 
-      const snapshotReads = fsSpy.mock.calls.filter(
-        (c) => typeof c[0] === 'string' && c[0].includes('Team.snapshot.json'),
-      );
-      expect(snapshotReads.length).toBeLessThanOrEqual(1);
+      // Delete the snapshot file so any subsequent real disk read would fail.
+      unlinkSync(snapshotPath);
 
-      fsSpy.mockRestore();
+      // Second call must NOT throw — the facade was cached after the first call
+      // and must be returned directly without re-reading the (now-deleted) snapshot.
+      expect(() => ctx.entity(teamEntity)).not.toThrow();
     });
   });
 

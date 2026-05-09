@@ -46,3 +46,9 @@ export type { Migration } from './migrations/index.js';
 
 export { createMigrationsClient } from './client/index.js';
 export type { MigrationsClient } from './client/index.js';
+
+// Phase 6 cross-entity reads — public types.
+// Runtime exports `buildCtx` and `createReadOnlyFacade` are framework-internal
+// and are NOT re-exported here; only the type contract is part of the
+// public API consumed by `electrodb-migrations/testing` (Phase 8).
+export type { MigrationCtx, ReadOnlyEntityFacade } from './ctx/index.js';
