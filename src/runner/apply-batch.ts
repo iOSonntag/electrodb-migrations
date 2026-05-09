@@ -1,5 +1,6 @@
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import type { ResolvedConfig } from '../config/index.js';
+import type { MigrationCtx } from '../ctx/index.js';
 import type { MigrationsServiceBundle } from '../internal-entities/index.js';
 import { startLockHeartbeat } from '../lock/index.js';
 import { appendInFlight, markFailed } from '../state-mutations/index.js';
@@ -18,7 +19,18 @@ export interface ApplyBatchArgs {
   migrationId?: string;
   runId: string;
   holder: string;
-  ctx?: unknown;
+  /**
+   * Optional pre-built ctx for `up()` — Phase 8 test harness affordance (RESEARCH §OQ9).
+   * When provided, passes through to `applyFlow` / `applyFlowScanWrite` which skip
+   * `buildCtx`'s pre-flight fingerprint validation. Production callers never set this.
+   */
+  ctx?: MigrationCtx;
+  /**
+   * The user's project root for snapshot resolution (Phase 6). Defaults to
+   * `process.cwd()` if absent. Plumbed from `MigrationsClient` (which already
+   * resolves `cwd = args.cwd ?? process.cwd()` at line 157).
+   */
+  cwd?: string;
 }
 
 export interface ApplyBatchResult {
@@ -126,6 +138,7 @@ export async function applyBatch(args: ApplyBatchArgs): Promise<ApplyBatchResult
     runId: args.runId,
     holder: args.holder,
     ...(args.ctx !== undefined ? { ctx: args.ctx } : {}),
+    ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
   });
   applied.push({ migId: first.id, itemCounts: firstResult.itemCounts });
 
@@ -153,6 +166,7 @@ export async function applyBatch(args: ApplyBatchArgs): Promise<ApplyBatchResult
         runId: args.runId,
         holder: args.holder,
         ...(args.ctx !== undefined ? { ctx: args.ctx } : {}),
+        ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
       });
       applied.push({ migId: next.id, itemCounts: result.itemCounts });
     } catch (err) {

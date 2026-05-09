@@ -188,6 +188,7 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
         ...(callArgs?.migrationId !== undefined ? { migrationId: callArgs.migrationId } : {}),
         runId,
         holder,
+        cwd, // Phase 6 — snapshot path resolution
       });
 
       // RUN-09 — write the apply success summary to stderr so operators see

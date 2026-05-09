@@ -1,5 +1,7 @@
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import type { ResolvedConfig } from '../config/index.js';
+import { buildCtx } from '../ctx/index.js';
+import type { MigrationCtx } from '../ctx/index.js';
 import { MIGRATIONS_SCHEMA_VERSION, type MigrationsServiceBundle } from '../internal-entities/index.js';
 import { acquireLock, startLockHeartbeat } from '../lock/index.js';
 import type { AnyElectroEntity, Migration } from '../migrations/index.js';
@@ -17,8 +19,20 @@ export interface ApplyFlowArgs {
   migration: Migration<AnyElectroEntity, AnyElectroEntity>;
   runId: string;
   holder: string;
-  /** Optional ctx for `up()` — Phase 6 wires the cross-entity reader; v0.1 leaves undefined. */
-  ctx?: unknown;
+  /**
+   * Optional pre-built ctx for `up()` — Phase 8 test harness affordance (RESEARCH §OQ9).
+   * When provided, the pre-flight fingerprint validation in `buildCtx` is skipped.
+   * Production callers (the CLI + programmatic API) never set this field; it always
+   * runs via `buildCtx`. Kept on `ApplyFlowArgs` so Phase 8's `testMigration` can
+   * inject a fake ctx without needing real snapshot files on disk.
+   */
+  ctx?: MigrationCtx;
+  /**
+   * The user's project root for snapshot resolution (Phase 6). Defaults to
+   * `process.cwd()` if absent. Plumbed from `MigrationsClient` (which already
+   * resolves `cwd = args.cwd ?? process.cwd()` at line 157).
+   */
+  cwd?: string;
 }
 
 export interface ApplyFlowResult {
@@ -134,13 +148,26 @@ export async function applyFlowScanWrite(args: ApplyFlowArgs): Promise<ApplyFlow
     } as never)
     .go();
 
+  // Phase 6 — build the cross-entity reads ctx, OR use the one the caller
+  // injected (Phase 8 test harness affordance per RESEARCH §OQ9).
+  // ORDERING INVARIANT (T-06-03-01): buildCtx runs AFTER the `_migrations` row PUT
+  // (so the catch block in `applyFlow` can patch status='failed' if buildCtx throws)
+  // and BEFORE the scan loop (so any EDBStaleEntityReadError / EDBSelfReadInMigrationError
+  // surfaces before the first v2 write — no half-migrated state).
+  const ctx: MigrationCtx = args.ctx ?? await buildCtx(
+    args.migration,
+    args.client,
+    args.tableName,
+    args.cwd ?? process.cwd(),
+  );
+
   for await (const page of iterateV1Records(args.migration)) {
     const v2Batch: Record<string, unknown>[] = [];
     for (const v1 of page) {
       audit.incrementScanned();
       let v2: unknown;
       try {
-        v2 = await args.migration.up(v1, args.ctx);
+        v2 = await args.migration.up(v1, ctx);
       } catch (err) {
         audit.incrementFailed();
         throw err; // RUN-08 fail-fast
