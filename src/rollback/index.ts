@@ -44,3 +44,6 @@ export type { RollbackResolverArgs } from '../migrations/types.js';
 
 // Case 1 (pre-release) rollback flow (RBK-03)
 export { rollbackCase1, type RollbackCase1Args, type RollbackCase1Result } from './case-1-flow.js';
+
+// Wave 3 orchestrator — single entry point composing Wave 1+2 modules (Plan 05-09)
+export { rollback, type RollbackArgs, type RollbackResult } from './orchestrator.js';
