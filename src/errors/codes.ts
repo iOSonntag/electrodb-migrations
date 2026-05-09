@@ -23,11 +23,17 @@ export const ERROR_CODES = {
  * SCREAMING_SNAKE_CASE — keys and values match. Sub-codes inside the already-
  * `EDB_`-prefixed `EDB_ROLLBACK_NOT_POSSIBLE` error, so they intentionally do
  * NOT carry an additional `EDB_` prefix.
+ *
+ * `READS_DEPENDENCY_APPLIED` — Phase 6 / CTX-08. README §6.6.4. Rolling back
+ * migration M is refused when any migration on a `reads`-target entity has
+ * been applied since M (the on-disk shape of the reads-target is newer than
+ * what M was authored against). Roll back the blocking migration first.
  */
 export const ROLLBACK_REASON_CODES = {
   NO_DOWN_FUNCTION: 'NO_DOWN_FUNCTION',
   NO_RESOLVER: 'NO_RESOLVER',
   FINALIZED_ONLY_PROJECTED: 'FINALIZED_ONLY_PROJECTED',
+  READS_DEPENDENCY_APPLIED: 'READS_DEPENDENCY_APPLIED', // Phase 6 — CTX-08
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

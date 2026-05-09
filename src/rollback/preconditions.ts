@@ -15,6 +15,8 @@
  *   - EDB_ROLLBACK_NOT_POSSIBLE / NO_DOWN_FUNCTION: projected or fill-only without down()
  *   - EDB_ROLLBACK_NOT_POSSIBLE / NO_RESOLVER: custom without rollbackResolver
  *   - EDB_ROLLBACK_NOT_POSSIBLE / FINALIZED_ONLY_PROJECTED: snapshot or fill-only on Case 3
+ *   - EDB_ROLLBACK_NOT_POSSIBLE / READS_DEPENDENCY_APPLIED (CTX-08, Phase 6):
+ *     reads-target has a later-applied migration; roll back that one first
  *
  * RESEARCH §Code Examples, lines 793-889.
  *
@@ -85,11 +87,17 @@ export type RollbackDecision =
  *  7. Determine lifecycle case via determineLifecycleCase.
  *  8. Strategy refusal table (Case 3 × snapshot/fill-only → FINALIZED_ONLY_PROJECTED).
  *  9. Capability checks (projected/fill-only → needs down(); custom → needs rollbackResolver).
- * 10. Return { kind: 'proceed', case: lifecycleCase, targetRow }.
+ * 10. CTX-08 cross-entity reads check (Phase 6) — refuse if any migration on a
+ *     `reads`-target entity has been applied since M. Uses fromVersion numeric
+ *     comparison (clock-skew safe per RESEARCH §A3).
+ * 11. Return { kind: 'proceed', case: lifecycleCase, targetRow }.
  */
 export async function checkPreconditions(args: CheckPreconditionsArgs): Promise<RollbackDecision> {
   // Step 1: scan all _migrations rows (small cardinality — one row per ever-applied migration).
-  const scanResult = (await args.service.migrations.scan.go({ pages: 'all' })) as { data: MigrationsRow[] };
+  // The `as unknown as { data: MigrationsRow[] }` cast is needed because ElectroDB's TS inference
+  // types `set`-attribute fields as `string[]`, whereas at runtime they are `Set<string>`.
+  // `findBlockingReadsDependency` normalises this defensively via `Array.isArray`.
+  const scanResult = (await args.service.migrations.scan.go({ pages: 'all' })) as unknown as { data: MigrationsRow[] };
   const allRows = scanResult.data;
 
   // Step 2: find target row.
@@ -168,7 +176,47 @@ export async function checkPreconditions(args: CheckPreconditionsArgs): Promise<
     return { kind: 'refuse', error: err };
   }
 
-  // Step 10: proceed (case-2 or case-3).
+  // Step 10: CTX-08 — refuse if any migration on a `reads`-target entity has been applied since M.
+  //
+  // Rationale (RESEARCH §OQ7, README §6.6.2):
+  //   When migration M reads entity Y via ctx.entity(Y), the on-disk shape of Y
+  //   must match the source Y the migration imported. That holds iff no applied/finalized
+  //   migration on Y has fromVersion >= M's toVersion. If Y has any such migration,
+  //   on-disk Y is at a newer shape — rolling back M would re-introduce v1 records of
+  //   M's entity that reference a now-stale Y shape.
+  //
+  //   The head-only rule (Step 5) catches within-entity ordering. CTX-08 extends
+  //   the rule across entities: a Team migration sequenced after the User migration M,
+  //   where M declares reads:[Team], blocks M's rollback. The user must roll back the
+  //   Team migration first.
+  //
+  // Sequence comparison uses `fromVersion` (numeric string) per RESEARCH §A3 /
+  // Pitfall 6 — `appliedAt` ISO timestamps are clock-skew-vulnerable in multi-developer
+  // environments. `fromVersion` is sequence-monotonic per entity.
+  //
+  // Note: Case 1 short-circuits at Step 7 (line ~133) — Step 10 is naturally
+  // unreachable for Case 1 (pre-release rollback has no reads-dependency semantic).
+  if (targetRow.reads !== undefined && targetRow.reads.size > 0) {
+    const blocking = findBlockingReadsDependency(allRows, targetRow);
+    if (blocking !== undefined) {
+      const err = new EDBRollbackNotPossibleError(
+        `Cannot rollback ${args.migration.id}: migration ${blocking.id} on reads-target ` +
+          `entity '${blocking.entityName}' has been applied since ${args.migration.id}. ` +
+          `Roll back ${blocking.id} first.`,
+        {
+          reason: ROLLBACK_REASON_CODES.READS_DEPENDENCY_APPLIED,
+          blockingMigration: blocking.id,
+          readsDependency: blocking.entityName,
+          migrationId: args.migration.id,
+        },
+      );
+      (err as Error & { remediation?: string }).remediation =
+        `Run \`rollback ${blocking.id}\` first, then re-run \`rollback ${args.migration.id}\`.`;
+      return { kind: 'refuse', error: err };
+    }
+  }
+
+  // Step 11 (was Step 10 in Phase 5): proceed (case-2 or case-3).
   return { kind: 'proceed', case: lifecycleCase, targetRow };
 }
 
@@ -206,4 +254,71 @@ function buildNotAppliedError(migrationId: string): Error & { code: string; reme
   err.code = 'EDB_NOT_APPLIED';
   err.remediation = `Run \`apply --migration ${migrationId}\` first if you want to apply it.`;
   return err;
+}
+
+// ---------------------------------------------------------------------------
+// CTX-08 helper
+// ---------------------------------------------------------------------------
+
+/**
+ * CTX-08 helper — finds a `_migrations` row that blocks rollback of `targetRow`
+ * due to a cross-entity reads dependency.
+ *
+ * A row R is blocking IFF ALL of the following hold:
+ *   1. R.entityName ∈ targetRow.reads (the row migrates a reads-target entity)
+ *   2. R.status ∈ {'applied', 'finalized'} (active dependency — NOT reverted/pending)
+ *   3. parseInt(R.fromVersion) >= parseInt(targetRow.toVersion) (R moves the
+ *      reads-target entity from a version >= the version M was authored against)
+ *
+ * The `>=` semantics: `targetRow.toVersion` is the version that M migrated TO
+ * for its OWN entity. A reads-target migration with `fromVersion` equal to or
+ * greater than that means the reads-target entity is now at a shape AT LEAST
+ * one version newer than what M's source code expected. Rolling back M would
+ * re-introduce v1 records that reference a stale reads-target shape.
+ *
+ * Returns the FIRST blocking row found, sorted by fromVersion ascending so the
+ * EARLIEST blocker is reported — the user fixes it first then re-runs.
+ * Returns `undefined` if no blocking row exists.
+ *
+ * RESEARCH §A3 (Pitfall 6): fromVersion comparison is clock-skew safe (vs
+ * `appliedAt` ISO timestamps which can drift between machines). Do NOT
+ * substitute `appliedAt` for `fromVersion` here.
+ *
+ * Normalisation note: ElectroDB's TS type infers `set`-attribute fields as
+ * `string[]`, but at runtime they are `Set<string>`. This function normalises
+ * `targetRow.reads` defensively via `Array.isArray` so that both representations
+ * are handled correctly.
+ */
+function findBlockingReadsDependency(
+  allRows: MigrationsRow[],
+  targetRow: MigrationsRow,
+): MigrationsRow | undefined {
+  const readsSet: Set<string> =
+    targetRow.reads === undefined
+      ? new Set()
+      : Array.isArray(targetRow.reads)
+        ? new Set(targetRow.reads as unknown as string[])
+        : targetRow.reads;
+
+  if (readsSet.size === 0) return undefined;
+
+  const targetToVersionInt = Number.parseInt(targetRow.toVersion, 10);
+
+  const blockers = allRows
+    .filter((r) => {
+      // Must be a reads-target entity.
+      if (!readsSet.has(r.entityName)) return false;
+      // Must be an active applied/finalized dependency (not reverted or pending).
+      if (r.status !== 'applied' && r.status !== 'finalized') return false;
+      // fromVersion numeric comparison — clock-skew-safe per RESEARCH §A3 / Pitfall 6.
+      const rFromInt = Number.parseInt(r.fromVersion ?? '', 10);
+      // NaN check: malformed fromVersion → treat as non-blocking (defensive).
+      if (Number.isNaN(rFromInt) || Number.isNaN(targetToVersionInt)) return false;
+      // Blocking iff reads-target was migrated from a version >= M's toVersion.
+      return rFromInt >= targetToVersionInt;
+    })
+    // Sort ascending by fromVersion so the earliest blocker is reported first.
+    .sort((a, b) => Number.parseInt(a.fromVersion ?? '0', 10) - Number.parseInt(b.fromVersion ?? '0', 10));
+
+  return blockers[0];
 }

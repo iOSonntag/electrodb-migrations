@@ -21,12 +21,24 @@
  * RBK-01.
  */
 
-/** Minimal `_migrations` row shape needed for head-only checks. */
+/** Minimal `_migrations` row shape needed for head-only checks and CTX-08 reads-dependency checks. */
 export interface MigrationsRow {
   id: string;
   entityName: string;
   status: string;
+  /** Sequence version the migration migrates FROM. Optional for backward-compat with head-only callers that pre-date CTX-08. */
+  fromVersion?: string;
   toVersion: string;
+  /**
+   * Phase 3 schema field (`reads: { type: 'set', items: 'string' }` per
+   * src/internal-entities/migrations.ts:94). Used by Phase 6 / CTX-08 in
+   * preconditions to detect cross-entity reads ordering violations.
+   *
+   * ElectroDB returns DDB `set` attributes as `Set<string>` at runtime
+   * (despite the TS type inferring `string[]` from the schema definition).
+   * The CTX-08 helper normalises this via `Array.isArray` + `new Set()`.
+   */
+  reads?: Set<string>;
 }
 
 /**
