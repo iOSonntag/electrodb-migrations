@@ -41,3 +41,6 @@ export { executeCustom, type ExecuteCustomArgs } from './strategies/custom.js'; 
 // RollbackResolverArgs is exported from src/migrations/types.ts; re-export
 // here so rollback consumers can import everything from one place.
 export type { RollbackResolverArgs } from '../migrations/types.js';
+
+// Case 1 (pre-release) rollback flow (RBK-03)
+export { rollbackCase1, type RollbackCase1Args, type RollbackCase1Result } from './case-1-flow.js';
