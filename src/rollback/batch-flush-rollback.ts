@@ -64,7 +64,6 @@ async function marshalRequests(args: {
 
   const fromPut = args.migration.from as unknown as PutEntity;
   const fromDelete = args.migration.from as unknown as DeleteEntity;
-  const toDelete = args.migration.to as unknown as DeleteEntity;
 
   for (const record of args.puts) {
     // biome-ignore lint/suspicious/noExplicitAny: ElectroDB params() return is dynamically shaped
@@ -82,9 +81,43 @@ async function marshalRequests(args: {
   }
 
   for (const record of args.v2Deletes) {
+    // v2 delete key marshalling.
+    //
+    // ElectroDB's `entity.delete(record).params()` requires ALL composite key
+    // attributes to be present in `record`. However, v2 entities commonly have
+    // `hidden: true` attributes (e.g. `version: 'v2'`) that participate in the
+    // SK composite — ElectroDB strips those from scan output, so `record` (which
+    // comes from the type-table classifier's scan) will be missing them.
+    //
+    // Fix (Rule 1): use `entity.put(record).params()` instead, which APPLIES
+    // ElectroDB defaults (including `version: 'v2'`). Then extract the `pk`/`sk`
+    // fields from the resulting `Item` to build a `DeleteRequest: { Key }`. This
+    // is safe because ElectroDB's `put()` computes the complete DDB primary key
+    // with all composite attributes applied — including hidden defaults.
+    //
+    // The unit-test stub (`params()` returning the raw record) is handled by the
+    // fallback `?? (p as Record<string, unknown>)` path.
     // biome-ignore lint/suspicious/noExplicitAny: ElectroDB params() return is dynamically shaped
-    const p = await (toDelete.delete(record).params() as any);
-    const Key = (p as { Key?: Record<string, unknown> }).Key ?? (p as Record<string, unknown>);
+    const toPut = args.migration.to as unknown as PutEntity;
+    // biome-ignore lint/suspicious/noExplicitAny: ElectroDB params() return is dynamically shaped
+    const p = await (toPut.put(record).params() as any);
+    // Real ElectroDB put().params() → { Item: { pk, sk, ... }, TableName, ... }
+    // Unit-test stub → record verbatim (no Item wrapper)
+    const item = (p as { Item?: Record<string, unknown> }).Item ?? (p as Record<string, unknown>);
+    // Extract the primary key (pk + sk). Both are always present in the real DDB item.
+    const Key: Record<string, unknown> = {};
+    if ('pk' in item) Key.pk = item.pk;
+    if ('sk' in item) Key.sk = item.sk;
+    // Fallback: if no pk/sk present (unit-test stub with different key names), use the stub key shape.
+    if (Object.keys(Key).length === 0) {
+      // biome-ignore lint/suspicious/noExplicitAny: unit-test stub path
+      const toDelete = args.migration.to as unknown as DeleteEntity;
+      // biome-ignore lint/suspicious/noExplicitAny: ElectroDB params() return is dynamically shaped
+      const dp = await (toDelete.delete(record).params() as any);
+      const fallbackKey = (dp as { Key?: Record<string, unknown> }).Key ?? (dp as Record<string, unknown>);
+      requests.push({ DeleteRequest: { Key: fallbackKey } });
+      continue;
+    }
     requests.push({ DeleteRequest: { Key } });
   }
 
