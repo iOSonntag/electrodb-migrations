@@ -1,6 +1,56 @@
 import { EDBMigrationInProgressError } from '../errors/index.js';
 
 /**
+ * A frozen snapshot of the per-process lock-state cache for operator inspection.
+ *
+ * Exposed via {@link getGuardCacheState} so callers (e.g., `client.getGuardState()`
+ * in Plan 05-10) can surface the guard's last-read result without re-reading DDB.
+ *
+ * **v0.1 contract** (API-05 + BLOCKER 2 / WARNING 3 design):
+ * - `cacheSize`: always 0 or 1 — the cache holds at most one lock-state value at a time.
+ * - `lastReadAt`: ISO timestamp of the most recent `fetchLockState` completion (resolved).
+ * - `lastReadResult`: `'allow'` if the cached value was `'free'`; `'block'` otherwise.
+ *
+ * The shape is intentionally minimal. It may evolve in future minor versions.
+ *
+ * @see {@link getGuardCacheState}
+ */
+export interface GuardStateSnapshot {
+  /** Number of cached entries currently held (always 0 or 1 for the lock-state cache). */
+  readonly cacheSize: number;
+  /** ISO timestamp of the most recent `fetchLockState` completion (resolved or rejected). */
+  readonly lastReadAt?: string;
+  /**
+   * Result of the most recent `fetchLockState` — `'allow'` if `value.value === 'free'`,
+   * else `'block'`.
+   */
+  readonly lastReadResult?: 'allow' | 'block';
+}
+
+// Module-scope snapshot mirror; updated by createLockStateCache on every successful fetch.
+// Per-process global design (matches existing module-scope cache pattern).
+let globalSnapshot: GuardStateSnapshot = { cacheSize: 0 };
+
+/**
+ * Return a frozen snapshot of the per-process lock-state cache.
+ *
+ * Reflects the most recent `createLockStateCache` instance's last `fetchLockState`
+ * resolution. Returns `{ cacheSize: 0 }` before any fetch has completed.
+ *
+ * **Per-process global:** in a typical usage pattern, `createMigrationsClient`
+ * creates exactly one `LockStateCache` per process. If multiple caches are created
+ * (e.g., in tests), the snapshot reflects the LAST cache that completed a fetch.
+ *
+ * Used by Plan 05-10's `client.getGuardState()` surface (API-05).
+ *
+ * @returns A frozen copy of the current {@link GuardStateSnapshot}.
+ */
+export function getGuardCacheState(): GuardStateSnapshot {
+  // Return a frozen copy so callers cannot mutate the module-scope state.
+  return Object.freeze({ ...globalSnapshot });
+}
+
+/**
  * The opaque value the cache stores. Includes `value` (the lockState literal)
  * and the optional `runId` of the holding runner so the middleware can include
  * it in the thrown `EDBMigrationInProgressError.details.runId` (README §9.3).
@@ -80,6 +130,13 @@ export function createLockStateCache(opts: CreateLockStateCacheArgs): LockStateC
         try {
           const value = await opts.fetchLockState();
           cached = { value, cachedAt: Date.now() };
+          // Update the module-scope snapshot so getGuardCacheState() reflects
+          // the most recent fetch result for operator inspection (WARNING 3 / API-05).
+          globalSnapshot = {
+            cacheSize: 1,
+            lastReadAt: new Date().toISOString(),
+            lastReadResult: value.value === 'free' ? 'allow' : 'block',
+          };
           return value;
         } catch (err) {
           // GRD-06 / Pitfall #1: fail closed.
@@ -93,6 +150,10 @@ export function createLockStateCache(opts: CreateLockStateCacheArgs): LockStateC
     reset: () => {
       cached = null;
       pending = null;
+      // Preserve lastReadAt and lastReadResult for diagnostic history — reset() is
+      // rarely called and clearing the timestamps would discard useful operator info.
+      // Update cacheSize to 0 to reflect the cleared cache.
+      globalSnapshot = { ...globalSnapshot, cacheSize: 0 };
     },
   };
 }

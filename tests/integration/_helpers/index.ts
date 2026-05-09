@@ -27,3 +27,5 @@ export {
 } from './eventual-consistency.js';
 
 export { seedV1Records } from './seed-records.js';
+export { seedV2Records } from './seed-v2-records.js';
+export { seedMixedRecords, type SeedMixedRecordsArgs, type SeedMixedRecordsResult } from './seed-mixed-records.js';
