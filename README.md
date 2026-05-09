@@ -778,6 +778,8 @@ export const handler = createLambdaMigrationHandler({
 
 When migration `M` reads entity `Y` via `ctx.entity(Y)`, the on-disk shape of `Y` must match the source `Y` you imported. That holds iff every pending migration on `Y` is sequenced *before* `M`. If `Y` has any migration sequenced after `M`, on-disk `Y` is still at an older shape and the read would silently mis-deserialize.
 
+The framework validates this match in two phases. Entities listed in `reads` (next section) are validated **eagerly** at the start of the apply run — before any v2 record is written. Entities accessed via `ctx.entity(Y)` without being declared in `reads` are validated **lazily** at first call. The eager path catches stale reads before any data is touched; the lazy path is the safety net for forgotten declarations.
+
 ##### 6.6.2 Declare what you read
 
 Add a `reads` field to `defineMigration` listing every entity the transform touches via `ctx.entity()`:
@@ -815,6 +817,16 @@ When `validate` flags a cross-entity ordering conflict, you have three options:
 1. **Re-timestamp** so the read target's migration runs first.
 2. **Combine** both changes into a single migration if they're tightly coupled.
 3. **Stop denormalizing** across that boundary — compute the value a different way that doesn't require the cross-entity read.
+
+##### 6.6.5 Errors
+
+| Error class | When | Details fields |
+|---|---|---|
+| `EDBSelfReadInMigrationError` | `ctx.entity(SelfEntity)` called from inside its own migration | `{migrationId, entityName}` |
+| `EDBStaleEntityReadError` | On-disk snapshot fingerprint ≠ imported entity fingerprint | `{entityName, migrationId, onDisk?, imported?}` |
+| `EDBRollbackNotPossibleError({reason: 'READS_DEPENDENCY_APPLIED'})` | Rolling back `M` when a reads-target entity has a later-applied migration | `{reason, blockingMigration, readsDependency, migrationId}` |
+
+All three are thrown **before** any DynamoDB call is issued. The `remediation` field on each error names the next operator action. See [§9.7](#97-edbstaleentityreaderror) and [§9.8](#98-edbselfreadinmigrationerror) for further detail.
 
 ### 7. Programmatic API
 
