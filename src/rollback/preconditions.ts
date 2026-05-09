@@ -89,7 +89,10 @@ export type RollbackDecision =
  */
 export async function checkPreconditions(args: CheckPreconditionsArgs): Promise<RollbackDecision> {
   // Step 1: scan all _migrations rows (small cardinality — one row per ever-applied migration).
-  const scanResult = (await args.service.migrations.scan.go({ pages: 'all' })) as { data: MigrationsRow[] };
+  // The `as unknown as { data: MigrationsRow[] }` cast is needed because ElectroDB's TS inference
+  // types `set`-attribute fields as `string[]`, whereas at runtime they are `Set<string>`.
+  // `findBlockingReadsDependency` normalises this defensively via `Array.isArray`.
+  const scanResult = (await args.service.migrations.scan.go({ pages: 'all' })) as unknown as { data: MigrationsRow[] };
   const allRows = scanResult.data;
 
   // Step 2: find target row.

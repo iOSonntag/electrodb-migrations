@@ -28,12 +28,24 @@ describe('ERROR_CODES', () => {
 });
 
 describe('ROLLBACK_REASON_CODES', () => {
-  it('exposes the three ERR-05 reason codes in SCREAMING_SNAKE_CASE', () => {
+  it('exposes the ERR-05 reason codes in SCREAMING_SNAKE_CASE (Phase 5 + Phase 6 / CTX-08)', () => {
     expect(ROLLBACK_REASON_CODES).toEqual({
       NO_DOWN_FUNCTION: 'NO_DOWN_FUNCTION',
       NO_RESOLVER: 'NO_RESOLVER',
       FINALIZED_ONLY_PROJECTED: 'FINALIZED_ONLY_PROJECTED',
+      READS_DEPENDENCY_APPLIED: 'READS_DEPENDENCY_APPLIED',
     });
+  });
+
+  it('existing Phase 5 reason code values are unchanged (wire-format compatibility)', () => {
+    expect(ROLLBACK_REASON_CODES.NO_DOWN_FUNCTION).toBe('NO_DOWN_FUNCTION');
+    expect(ROLLBACK_REASON_CODES.NO_RESOLVER).toBe('NO_RESOLVER');
+    expect(ROLLBACK_REASON_CODES.FINALIZED_ONLY_PROJECTED).toBe('FINALIZED_ONLY_PROJECTED');
+  });
+
+  it('READS_DEPENDENCY_APPLIED does NOT carry EDB_ prefix (sub-code convention)', () => {
+    expect(ROLLBACK_REASON_CODES.READS_DEPENDENCY_APPLIED).toBe('READS_DEPENDENCY_APPLIED');
+    expect(ROLLBACK_REASON_CODES.READS_DEPENDENCY_APPLIED).not.toMatch(/^EDB_/);
   });
 });
 
