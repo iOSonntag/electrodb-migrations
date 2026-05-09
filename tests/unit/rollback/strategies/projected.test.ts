@@ -12,10 +12,10 @@
  * hand-rolled async generator that yields canned TypeTableEntry values.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { executeProjected } from '../../rollback/strategies/projected.js';
-import { createRollbackAudit } from '../../rollback/audit.js';
-import { makeRollbackStubService } from '../rollback/_stub-service.js';
-import type { TypeTableEntry } from '../../rollback/type-table.js';
+import { executeProjected } from '../../../../src/rollback/strategies/projected.js';
+import { createRollbackAudit } from '../../../../src/rollback/audit.js';
+import { makeRollbackStubService } from '../_stub-service.js';
+import type { TypeTableEntry } from '../../../../src/rollback/type-table.js';
 
 // ---------------------------------------------------------------------------
 // Test helpers
