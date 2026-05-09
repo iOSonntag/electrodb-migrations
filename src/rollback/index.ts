@@ -31,3 +31,10 @@ export {
   type TypeTableCounts,
   type ClassifyTypeTableArgs,
 } from './type-table.js';
+
+// Strategy executors (Wave 2 — RBK-08 custom strategy)
+export { executeCustom, type ExecuteCustomArgs } from './strategies/custom.js';
+
+// RollbackResolverArgs is also exported from src/migrations/types.ts; we
+// re-export it here so rollback consumers can import everything from one place.
+export type { RollbackResolverArgs } from '../migrations/types.js';

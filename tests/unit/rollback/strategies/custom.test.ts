@@ -98,8 +98,8 @@ describe('executeCustom (RBK-08)', () => {
 
     const args: ExecuteCustomArgs = {
       classify: makeClassify([]),
-      migration: migration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: migration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
@@ -132,8 +132,8 @@ describe('executeCustom (RBK-08)', () => {
 
     const args: ExecuteCustomArgs = {
       classify: makeClassify(entries),
-      migration: migration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: migration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
@@ -167,8 +167,8 @@ describe('executeCustom (RBK-08)', () => {
 
     const args: ExecuteCustomArgs = {
       classify: makeClassify(entries),
-      migration: migration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: migration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
@@ -196,8 +196,8 @@ describe('executeCustom (RBK-08)', () => {
 
     const args: ExecuteCustomArgs = {
       classify: makeClassify(entries),
-      migration: migration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: migration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
@@ -244,8 +244,8 @@ describe('executeCustom (RBK-08)', () => {
 
     const args: ExecuteCustomArgs = {
       classify: makeClassify(entries),
-      migration: migration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: migration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
@@ -272,8 +272,8 @@ describe('executeCustom (RBK-08)', () => {
 
     const args: ExecuteCustomArgs = {
       classify: makeClassify([entryB()]),
-      migration: migration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: migration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
@@ -301,8 +301,8 @@ describe('executeCustom (RBK-08)', () => {
 
     const args: ExecuteCustomArgs = {
       classify: makeClassify([entryA()]),
-      migration: migration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: migration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
@@ -329,20 +329,20 @@ describe('executeCustom (RBK-08)', () => {
       '../../../../tests/_helpers/sample-migrations/User-add-status-with-resolver/index.js'
     );
     const realMigration = createUserAddStatusWithResolverMigration(
-      stubSvc.client as ExecuteCustomArgs['client'],
+      stubSvc.client as never,
       'test-table',
     );
     // Override resolver to return a v2-shaped record with wrong name type
     // (ElectroDB will throw on name:42 since name is type 'string' required)
     const badRecord = { id: 'u-1', name: 42, status: 'active' };
     const resolverSpy = vi.fn(async (_args: unknown) => badRecord);
-    (realMigration as Record<string, unknown>).rollbackResolver = resolverSpy;
+    (realMigration as unknown as Record<string, unknown>).rollbackResolver = resolverSpy;
 
     const domainKey = 'id=u-1';
     const args: ExecuteCustomArgs = {
       classify: makeClassify([entryA()]),
-      migration: realMigration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: realMigration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
@@ -367,8 +367,8 @@ describe('executeCustom (RBK-08)', () => {
 
     const args: ExecuteCustomArgs = {
       classify: makeClassify([entryA()]),
-      migration: migration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: migration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
@@ -395,8 +395,8 @@ describe('executeCustom (RBK-08)', () => {
 
     const args: ExecuteCustomArgs = {
       classify: makeClassify([entryA()]),
-      migration: migration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: migration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
@@ -425,8 +425,8 @@ describe('executeCustom (RBK-08)', () => {
     const e = entryA();
     const args: ExecuteCustomArgs = {
       classify: makeClassify([e]),
-      migration: migration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: migration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
@@ -458,8 +458,8 @@ describe('executeCustom (RBK-08)', () => {
     const e = entryB();
     const args: ExecuteCustomArgs = {
       classify: makeClassify([e]),
-      migration: migration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: migration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
@@ -489,8 +489,8 @@ describe('executeCustom (RBK-08)', () => {
     const e = entryC();
     const args: ExecuteCustomArgs = {
       classify: makeClassify([e]),
-      migration: migration as ExecuteCustomArgs['migration'],
-      client: stubSvc.client as ExecuteCustomArgs['client'],
+      migration: migration as never,
+      client: stubSvc.client as never,
       tableName: 'test-table',
       audit,
     };
