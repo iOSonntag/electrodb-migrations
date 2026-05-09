@@ -24,6 +24,14 @@ vi.mock('../../../src/runner/index.js', () => ({
   finalizeFlow: vi.fn(),
   loadPendingMigrations: vi.fn(),
   renderApplySummary: vi.fn(() => ''),
+  // WR-10: client.history() and client.status() now use the canonical
+  // normalizeHistoryRow helper. Provide a faithful stub so the Set→array
+  // conversion behaviour the tests pin still works.
+  normalizeHistoryRow: (r: { reads?: ReadonlySet<string> | ReadonlyArray<string> }) => {
+    const { reads, ...rest } = r;
+    const readsArr = reads === undefined ? undefined : [...reads].sort();
+    return { ...rest, ...(readsArr !== undefined ? { reads: readsArr } : {}) };
+  },
 }));
 
 vi.mock('../../../src/lock/index.js', () => ({
