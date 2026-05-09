@@ -76,10 +76,11 @@ describe('source-scan invariants for src/lock/ + src/guard/ + src/runner/ + src/
     // - Plan 05-03 creates the first files under src/rollback/
     //   (identity-stamp.ts, type-table.ts, index.ts).
     // Once those land, the invariants apply automatically via the glob.
-    // Plans 05-02 and 05-03 created the first files under src/rollback/; this
-    // assertion confirms the glob picks them up (Plan 05-01 introduced the
-    // sentinel as `.toBe(false)`; flipped to `.toBe(true)` when the first
-    // src/rollback/ file landed).
+    // Plans 05-02, 05-03, and 05-04 seeded the first files under src/rollback/
+    // (preconditions/lifecycle/head-only, identity-stamp/type-table, and
+    // audit/resolver-validate/batch-flush respectively). The tracker assertion
+    // is now flipped to confirm src/rollback/ presence; the invariants apply
+    // automatically via the glob.
     expect(files.some((f) => f.includes('src/rollback/'))).toBe(true);
     for (const file of files) {
       const stripped = stripCommentLines(readFileSync(file, 'utf8'));
