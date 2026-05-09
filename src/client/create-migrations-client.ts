@@ -299,7 +299,12 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
           throw err;
         }
         if (!row.lockRunId) {
-          throw new Error('release refused — release-mode lock missing lockRunId (corrupted state).');
+          const err: Error & { code?: string; remediation?: string } = new Error(
+            'release refused — release-mode lock row exists but lockRunId is missing (corrupted state).',
+          );
+          err.code = 'EDB_LOCK_CORRUPT';
+          err.remediation = 'Inspect with `electrodb-migrations status`. If the lock state is unrecoverable, use `electrodb-migrations unlock --force`.';
+          throw err;
         }
         await clear(bundle, { runId: row.lockRunId });
         return { cleared: true };
