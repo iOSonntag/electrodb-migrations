@@ -33,42 +33,52 @@ export async function runHistory(args: RunHistoryArgs): Promise<void> {
   });
   const region = config.region;
   const ddb = region !== undefined ? new DynamoDBClient({ region }) : new DynamoDBClient({});
-  const client = createMigrationsClient({ config, client: ddb, cwd: args.cwd });
 
-  const rows = await client.history(args.entity !== undefined ? { entity: args.entity } : undefined);
+  try {
+    const client = createMigrationsClient({ config, client: ddb, cwd: args.cwd });
 
-  if (args.json) {
-    process.stdout.write(formatHistoryJson(rows, args.entity !== undefined ? { entity: args.entity } : {}));
-    return;
+    const rows = await client.history(args.entity !== undefined ? { entity: args.entity } : undefined);
+
+    if (args.json) {
+      process.stdout.write(formatHistoryJson(rows, args.entity !== undefined ? { entity: args.entity } : {}));
+      return;
+    }
+
+    if (rows.length === 0) {
+      log.info(
+        args.entity !== undefined
+          ? `No migrations recorded for entity '${args.entity}'.`
+          : 'No migrations recorded.',
+      );
+      return;
+    }
+
+    // Sort ascending by id (id contains timestamp prefix → chronological order).
+    const sorted = [...rows].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+    const table = createTable({
+      head: ['id', 'entityName', 'from→to', 'status', 'appliedAt', 'finalizedAt', 'scanned/migrated/deleted/skipped/failed'],
+      rows: sorted.map((r) => [
+        r.id,
+        r.entityName,
+        `${r.fromVersion}→${r.toVersion}`,
+        r.status,
+        r.appliedAt ?? '—',
+        r.finalizedAt ?? '—',
+        r.itemCounts
+          ? `${r.itemCounts.scanned}/${r.itemCounts.migrated}/${r.itemCounts.deleted ?? 0}/${r.itemCounts.skipped}/${r.itemCounts.failed}`
+          : '—',
+      ]),
+    });
+    process.stdout.write(`${table.toString()}\n`);
+  } finally {
+    // WR-07 — release the SDK's HTTP/socket pool.
+    try {
+      ddb.destroy();
+    } catch {
+      // ignore — destroy() is best-effort.
+    }
   }
-
-  if (rows.length === 0) {
-    log.info(
-      args.entity !== undefined
-        ? `No migrations recorded for entity '${args.entity}'.`
-        : 'No migrations recorded.',
-    );
-    return;
-  }
-
-  // Sort ascending by id (id contains timestamp prefix → chronological order).
-  const sorted = [...rows].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-
-  const table = createTable({
-    head: ['id', 'entityName', 'from→to', 'status', 'appliedAt', 'finalizedAt', 'scanned/migrated/deleted/skipped/failed'],
-    rows: sorted.map((r) => [
-      r.id,
-      r.entityName,
-      `${r.fromVersion}→${r.toVersion}`,
-      r.status,
-      r.appliedAt ?? '—',
-      r.finalizedAt ?? '—',
-      r.itemCounts
-        ? `${r.itemCounts.scanned}/${r.itemCounts.migrated}/${r.itemCounts.deleted ?? 0}/${r.itemCounts.skipped}/${r.itemCounts.failed}`
-        : '—',
-    ]),
-  });
-  process.stdout.write(`${table.toString()}\n`);
 }
 
 export function registerHistoryCommand(program: Command): void {

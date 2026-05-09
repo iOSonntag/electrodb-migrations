@@ -31,17 +31,27 @@ export async function runRelease(args: RunReleaseArgs): Promise<void> {
 
   const region = config.region;
   const ddb = region !== undefined ? new DynamoDBClient({ region }) : new DynamoDBClient({});
-  const client = createMigrationsClient({ config, client: ddb, cwd: args.cwd });
 
-  const spinner = createSpinner('Clearing release-mode lock...');
-  spinner.start();
-  const result = await client.release();
-  if (!result.cleared) {
-    spinner.stop();
-    log.info('No active release-mode lock — nothing to do.'); // REL-02
-    return;
+  try {
+    const client = createMigrationsClient({ config, client: ddb, cwd: args.cwd });
+
+    const spinner = createSpinner('Clearing release-mode lock...');
+    spinner.start();
+    const result = await client.release();
+    if (!result.cleared) {
+      spinner.stop();
+      log.info('No active release-mode lock — nothing to do.'); // REL-02
+      return;
+    }
+    spinner.success('Release-mode lock cleared.');
+  } finally {
+    // WR-07 — release the SDK's HTTP/socket pool.
+    try {
+      ddb.destroy();
+    } catch {
+      // ignore — destroy() is best-effort.
+    }
   }
-  spinner.success('Release-mode lock cleared.');
 }
 
 /** Register the `release` subcommand. No flags. */

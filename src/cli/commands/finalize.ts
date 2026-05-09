@@ -49,20 +49,30 @@ export async function runFinalize(args: RunFinalizeArgs): Promise<void> {
 
   const region = config.region;
   const ddb = region !== undefined ? new DynamoDBClient({ region }) : new DynamoDBClient({});
-  const client = createMigrationsClient({ config, client: ddb, cwd: args.cwd });
 
-  const target = args.migrationId !== undefined ? args.migrationId : '__all__';
-  const spinner = createSpinner(args.all ? 'Finalizing all applied migrations...' : `Finalizing ${target}...`);
-  spinner.start();
-  const result = await client.finalize(args.all ? { all: true } : args.migrationId!);
-  if (result.finalized.length === 0) {
-    spinner.stop();
-    log.info('No applied migrations to finalize.');
-    return;
-  }
-  spinner.success(c.ok(`Finalized ${result.finalized.length} migration${result.finalized.length === 1 ? '' : 's'}.`));
-  for (const f of result.finalized) {
-    log.info(`  • ${f.migId}: ${f.itemCounts.scanned} scanned, ${f.itemCounts.deleted} deleted, ${f.itemCounts.skipped} skipped, ${f.itemCounts.failed} failed`);
+  try {
+    const client = createMigrationsClient({ config, client: ddb, cwd: args.cwd });
+
+    const target = args.migrationId !== undefined ? args.migrationId : '__all__';
+    const spinner = createSpinner(args.all ? 'Finalizing all applied migrations...' : `Finalizing ${target}...`);
+    spinner.start();
+    const result = await client.finalize(args.all ? { all: true } : args.migrationId!);
+    if (result.finalized.length === 0) {
+      spinner.stop();
+      log.info('No applied migrations to finalize.');
+      return;
+    }
+    spinner.success(c.ok(`Finalized ${result.finalized.length} migration${result.finalized.length === 1 ? '' : 's'}.`));
+    for (const f of result.finalized) {
+      log.info(`  • ${f.migId}: ${f.itemCounts.scanned} scanned, ${f.itemCounts.deleted} deleted, ${f.itemCounts.skipped} skipped, ${f.itemCounts.failed} failed`);
+    }
+  } finally {
+    // WR-07 — release the SDK's HTTP/socket pool.
+    try {
+      ddb.destroy();
+    } catch {
+      // ignore — destroy() is best-effort.
+    }
   }
 }
 

@@ -36,59 +36,69 @@ export async function runStatus(args: RunStatusArgs): Promise<void> {
   });
   const region = config.region;
   const ddb = region !== undefined ? new DynamoDBClient({ region }) : new DynamoDBClient({});
-  const client = createMigrationsClient({ config, client: ddb, cwd: args.cwd });
 
-  const result = await client.status();
+  try {
+    const client = createMigrationsClient({ config, client: ddb, cwd: args.cwd });
 
-  if (args.json) {
-    // Set fields → sorted arrays for stable JSON output (Pitfall 8 + HF-3).
-    const lockJson =
-      result.lock === null
-        ? null
-        : {
-            ...result.lock,
-            inFlightIds: result.lock.inFlightIds ? [...result.lock.inFlightIds].sort() : [],
-            failedIds: result.lock.failedIds ? [...result.lock.failedIds].sort() : [],
-            releaseIds: result.lock.releaseIds ? [...result.lock.releaseIds].sort() : [],
-          };
-    process.stdout.write(`${JSON.stringify({ lock: lockJson, recent: result.recent }, null, 2)}\n`);
-    return;
-  }
+    const result = await client.status();
 
-  // Lock state table (1 row).
-  if (result.lock === null) {
-    log.info('Lock row not bootstrapped — run `electrodb-migrations init` then `baseline` first.');
-  } else {
-    const lockTable = createTable({
-      head: ['lockState', 'lockHolder', 'lockRunId', 'lockMigrationId', 'heartbeatAt', 'inFlightIds'],
-      rows: [
-        [
-          colorizeLockState(result.lock.lockState),
-          result.lock.lockHolder ?? '—',
-          result.lock.lockRunId ?? '—',
-          result.lock.lockMigrationId ?? '—',
-          result.lock.heartbeatAt ?? '—',
-          result.lock.inFlightIds ? [...result.lock.inFlightIds].sort().join(', ') : '—',
+    if (args.json) {
+      // Set fields → sorted arrays for stable JSON output (Pitfall 8 + HF-3).
+      const lockJson =
+        result.lock === null
+          ? null
+          : {
+              ...result.lock,
+              inFlightIds: result.lock.inFlightIds ? [...result.lock.inFlightIds].sort() : [],
+              failedIds: result.lock.failedIds ? [...result.lock.failedIds].sort() : [],
+              releaseIds: result.lock.releaseIds ? [...result.lock.releaseIds].sort() : [],
+            };
+      process.stdout.write(`${JSON.stringify({ lock: lockJson, recent: result.recent }, null, 2)}\n`);
+      return;
+    }
+
+    // Lock state table (1 row).
+    if (result.lock === null) {
+      log.info('Lock row not bootstrapped — run `electrodb-migrations init` then `baseline` first.');
+    } else {
+      const lockTable = createTable({
+        head: ['lockState', 'lockHolder', 'lockRunId', 'lockMigrationId', 'heartbeatAt', 'inFlightIds'],
+        rows: [
+          [
+            colorizeLockState(result.lock.lockState),
+            result.lock.lockHolder ?? '—',
+            result.lock.lockRunId ?? '—',
+            result.lock.lockMigrationId ?? '—',
+            result.lock.heartbeatAt ?? '—',
+            result.lock.inFlightIds ? [...result.lock.inFlightIds].sort().join(', ') : '—',
+          ],
         ],
-      ],
-    });
-    process.stdout.write(`${lockTable.toString()}\n`);
-  }
+      });
+      process.stdout.write(`${lockTable.toString()}\n`);
+    }
 
-  // Recent migrations table.
-  if (result.recent.length > 0) {
-    const recentTable = createTable({
-      head: ['id', 'entityName', 'from→to', 'status', 'appliedAt', 'finalizedAt'],
-      rows: result.recent.map((r) => [
-        r.id,
-        r.entityName,
-        `${r.fromVersion}→${r.toVersion}`,
-        colorizeStatus(r.status),
-        r.appliedAt ?? '—',
-        r.finalizedAt ?? '—',
-      ]),
-    });
-    process.stdout.write(`${recentTable.toString()}\n`);
+    // Recent migrations table.
+    if (result.recent.length > 0) {
+      const recentTable = createTable({
+        head: ['id', 'entityName', 'from→to', 'status', 'appliedAt', 'finalizedAt'],
+        rows: result.recent.map((r) => [
+          r.id,
+          r.entityName,
+          `${r.fromVersion}→${r.toVersion}`,
+          colorizeStatus(r.status),
+          r.appliedAt ?? '—',
+          r.finalizedAt ?? '—',
+        ]),
+      });
+      process.stdout.write(`${recentTable.toString()}\n`);
+    }
+  } finally {
+    // WR-07 — release the SDK's HTTP/socket pool.
+    try {
+      ddb.destroy();
+    } catch {
+      // ignore — destroy() is best-effort.
+    }
   }
 }
 

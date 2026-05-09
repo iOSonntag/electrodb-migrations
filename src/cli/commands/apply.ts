@@ -38,42 +38,55 @@ export async function runApply(args: RunApplyArgs): Promise<void> {
   const region = config.region;
   const ddb = region !== undefined ? new DynamoDBClient({ region }) : new DynamoDBClient({});
 
-  // Step 2: build the migrations client.
-  const client = createMigrationsClient({
-    config,
-    client: ddb,
-    cwd: args.cwd,
-  });
-
-  // Step 3: spinner + apply.
-  const spinner = createSpinner(
-    args.migrationId !== undefined ? `Applying ${args.migrationId}...` : 'Applying pending migrations...',
-  );
-  spinner.start();
-  let result: Awaited<ReturnType<typeof client.apply>>;
   try {
-    result = await client.apply(
-      args.migrationId !== undefined ? { migrationId: args.migrationId } : {},
+    // Step 2: build the migrations client.
+    const client = createMigrationsClient({
+      config,
+      client: ddb,
+      cwd: args.cwd,
+    });
+
+    // Step 3: spinner + apply.
+    const spinner = createSpinner(
+      args.migrationId !== undefined ? `Applying ${args.migrationId}...` : 'Applying pending migrations...',
     );
-  } catch (err) {
-    spinner.error('Apply failed.');
-    throw err;
-  }
+    spinner.start();
+    let result: Awaited<ReturnType<typeof client.apply>>;
+    try {
+      result = await client.apply(
+        args.migrationId !== undefined ? { migrationId: args.migrationId } : {},
+      );
+    } catch (err) {
+      spinner.error('Apply failed.');
+      throw err;
+    }
 
-  if (result.applied.length === 0) {
+    if (result.applied.length === 0) {
+      spinner.stop();
+      log.info('No migrations to apply.'); // RUN-07
+      return;
+    }
+
+    // Step 4: summary (RUN-09) is written to stderr by client.apply() itself.
+    // The programmatic client emits the "Next steps" checklist so it is visible
+    // regardless of whether the operator invokes via CLI or programmatic API.
+    // We deliberately do NOT call spinner.success() here — the multi-line
+    // summary the client just wrote is the canonical confirmation, and adding
+    // a redundant one-liner after it produces awkward output (and may overwrite
+    // portions of the summary if the spinner library uses cursor manipulation).
     spinner.stop();
-    log.info('No migrations to apply.'); // RUN-07
-    return;
+  } finally {
+    // WR-07 — release the SDK's HTTP/socket pool so long-running processes
+    // (programmatic invocations from a test harness or Lambda warm path)
+    // don't leak handles. Best-effort: a destroy failure must not mask a
+    // command-level error.
+    try {
+      ddb.destroy();
+    } catch {
+      // ignore — destroy() is synchronous and shouldn't throw, but we never
+      // want cleanup to surface above the actual operation result.
+    }
   }
-
-  // Step 4: summary (RUN-09) is written to stderr by client.apply() itself.
-  // The programmatic client emits the "Next steps" checklist so it is visible
-  // regardless of whether the operator invokes via CLI or programmatic API.
-  // We deliberately do NOT call spinner.success() here — the multi-line
-  // summary the client just wrote is the canonical confirmation, and adding
-  // a redundant one-liner after it produces awkward output (and may overwrite
-  // portions of the summary if the spinner library uses cursor manipulation).
-  spinner.stop();
 }
 
 /** Register the `apply` subcommand. */
