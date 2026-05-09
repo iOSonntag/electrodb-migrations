@@ -73,6 +73,22 @@ vi.mock('../../../src/guard/index.js', () => ({
   GATING_LOCK_STATES: new Set(),
   // runUnguarded: bypass context — in tests, just call fn() directly.
   runUnguarded: vi.fn((fn: () => Promise<unknown>) => fn()),
+  getGuardCacheState: vi.fn(() => ({ cacheSize: 0 })),
+}));
+
+vi.mock('../../../src/rollback/index.js', () => ({
+  rollback: vi.fn(),
+  checkPreconditions: vi.fn(),
+  determineLifecycleCase: vi.fn(),
+  findHeadViolation: vi.fn(),
+  classifyOwner: vi.fn(),
+  extractDomainKey: vi.fn(),
+  classifyTypeTable: vi.fn(),
+  executeProjected: vi.fn(),
+  executeFillOnly: vi.fn(),
+  executeSnapshot: vi.fn(),
+  executeCustom: vi.fn(),
+  rollbackCase1: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -202,7 +218,7 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('CMC-1 — factory shape', () => {
-  it('returns an object with exactly the 6 v0.1 methods', () => {
+  it('returns an object with all v0.1 + API-05 methods', () => {
     const client = createMigrationsClient(makeClientArgs());
     expect(typeof client.apply).toBe('function');
     expect(typeof client.finalize).toBe('function');
@@ -210,9 +226,16 @@ describe('CMC-1 — factory shape', () => {
     expect(typeof client.history).toBe('function');
     expect(typeof client.status).toBe('function');
     expect(typeof client.guardedClient).toBe('function');
-    // Ensure no extra methods from future phases are present
+    // API-05 methods added in Phase 5
+    expect(typeof client.rollback).toBe('function');
+    expect(typeof client.forceUnlock).toBe('function');
+    expect(typeof client.getLockState).toBe('function');
+    expect(typeof client.getGuardState).toBe('function');
+    // __bundle is non-enumerable — should NOT appear in Object.keys
     const keys = Object.keys(client).sort();
-    expect(keys).toEqual(['apply', 'finalize', 'guardedClient', 'history', 'release', 'status'].sort());
+    expect(keys).toEqual(
+      ['apply', 'finalize', 'forceUnlock', 'getLockState', 'getGuardState', 'guardedClient', 'history', 'release', 'rollback', 'status'].sort(),
+    );
   });
 });
 

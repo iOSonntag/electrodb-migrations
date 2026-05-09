@@ -5,6 +5,9 @@ import type { LockRowSnapshot } from '../lock/index.js';
 import type { AnyElectroEntity, Migration } from '../migrations/index.js';
 import type { ItemCounts } from '../runner/count-audit.js';
 import type { HistoryRow } from '../runner/history-format.js';
+import type { UnlockResult } from '../state-mutations/index.js';
+import type { RollbackItemCounts } from '../rollback/audit.js';
+import type { GuardStateSnapshot } from '../guard/index.js';
 
 /**
  * Options the user passes to {@link createMigrationsClient}. v0.1 expects
@@ -70,4 +73,65 @@ export interface MigrationsClient {
    * uses the UNGUARDED client internally.
    */
   guardedClient(): DynamoDBDocumentClient;
+
+  /**
+   * RBK-02 — roll back a migration. The id MUST be the head migration of its
+   * entity (per RBK-01 head-only rule); preconditions refuse with
+   * EDBRollbackOutOfOrderError otherwise.
+   *
+   * The strategy default is 'projected'; when 'snapshot' is selected, the `yes`
+   * flag controls the interactive confirmation prompt (CLI sets it via the
+   * --yes flag). The `io` field is an injection point for testing (production
+   * omits it).
+   */
+  rollback(
+    id: string,
+    options: {
+      strategy: 'projected' | 'snapshot' | 'fill-only' | 'custom';
+      yes?: boolean;
+      io?: {
+        stdin?: NodeJS.ReadableStream;
+        stderr?: { write: (s: string) => boolean };
+        confirm?: (prompt: string) => Promise<boolean>;
+      };
+    },
+  ): Promise<{ itemCounts: RollbackItemCounts }>;
+
+  /**
+   * API-05 — operator-path forced clear. Wraps `forceUnlock` from
+   * src/lock/unlock.ts which dispatches the LCK-08 truth table.
+   *
+   * **`yes` is REQUIRED for the call to proceed.** The signature accepts
+   * `yes?: boolean` for ergonomics, but when `yes !== true`, the method
+   * REJECTS with `EDBUnlockRequiresConfirmationError`. Rationale: this mirrors
+   * the CLI's panic-button refusal — the CLI MUST prompt before proceeding
+   * (CLI-05); the programmatic API MUST require explicit `yes: true`
+   * acknowledgement that the caller is bypassing the safety prompt. The CLI
+   * and programmatic surfaces are intentionally consistent (BLOCKER 2 fix /
+   * REQUIREMENTS.md line 188).
+   *
+   * Returns `{priorState}`; the CLI uses this to surface "the in-progress
+   * migration was marked as failed" messaging when priorState was an active
+   * state.
+   *
+   * @throws EDBUnlockRequiresConfirmationError — when args.yes !== true
+   */
+  forceUnlock(args: { runId: string; yes?: boolean }): Promise<UnlockResult>;
+
+  /**
+   * API-05 — read the current lock row for inspection. Used by the unlock
+   * CLI's pre-execute pre-render. Returns null if the row doesn't exist
+   * (fresh project, never bootstrapped).
+   */
+  getLockState(): Promise<LockRowSnapshot | null>;
+
+  /**
+   * API-05 — snapshot of the guard cache state for operator inspection.
+   *
+   * Returns the pinned `GuardStateSnapshot` shape from `src/guard/cache.ts`
+   * (cacheSize + optional lastReadAt + optional lastReadResult). The CLI's
+   * status command (Phase 4) may consume this in a future enhancement; v0.1
+   * the method is available but the CLI doesn't yet surface it.
+   */
+  getGuardState(): Promise<GuardStateSnapshot>;
 }
