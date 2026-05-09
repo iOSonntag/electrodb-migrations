@@ -16,7 +16,6 @@
  * RESEARCH §Pattern 2, §OQ1 (Pitfall 2: query/scan are namespace objects).
  */
 import { describe, expect, it, vi } from 'vitest';
-// @ts-expect-error — Plan 06-02 ships src/ctx/read-only-facade.ts; remove this directive when the file lands.
 import { createReadOnlyFacade } from '../../../src/ctx/read-only-facade.js';
 import { Entity } from 'electrodb';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
