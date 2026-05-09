@@ -31,3 +31,7 @@ export {
   type TypeTableCounts,
   type ClassifyTypeTableArgs,
 } from './type-table.js';
+
+// Wave 2 strategy executors (RBK-05 / RBK-07)
+export { executeProjected, type ExecuteStrategyArgs } from './strategies/projected.js';
+export { executeFillOnly } from './strategies/fill-only.js';
