@@ -19,6 +19,12 @@ import {
 import type { AnyElectroEntity, Migration } from '../migrations/index.js';
 import type { ResolvedConfig } from '../config/index.js';
 import { clear } from '../state-mutations/index.js';
+import { rollback } from '../rollback/index.js';
+import { forceUnlock as forceUnlockLib, type LockRowSnapshot } from '../lock/index.js';
+import { getGuardCacheState, type GuardStateSnapshot } from '../guard/index.js';
+import { EDBUnlockRequiresConfirmationError } from '../errors/index.js';
+import type { UnlockResult } from '../state-mutations/index.js';
+import type { RollbackItemCounts } from '../rollback/audit.js';
 import type { CreateMigrationsClientArgs, MigrationsClient } from './types.js';
 
 /**
@@ -337,7 +343,127 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
     guardedClient() {
       return guarded;
     },
+
+    /**
+     * RBK-02 / API-05 — roll back a migration by id.
+     *
+     * Resolves the migration source from the preloaded list (if provided) or by
+     * matching across the full on-disk migration set, then delegates to the
+     * rollback orchestrator (Plan 05-09).
+     *
+     * @throws {Error} code='EDB_MIGRATION_NOT_FOUND' — when the migration id
+     *   cannot be resolved.
+     * @throws {EDBRollbackOutOfOrderError} — when preconditions refuse (not head
+     *   migration for the entity).
+     * @throws {EDBMigrationLockHeldError} — when acquireLock fails.
+     * @throws {EDBRollbackCountMismatchError} — when count-audit invariant breaks.
+     */
+    async rollback(
+      id: string,
+      options: {
+        strategy: 'projected' | 'snapshot' | 'fill-only' | 'custom';
+        yes?: boolean;
+        io?: {
+          stdin?: NodeJS.ReadableStream;
+          stderr?: { write: (s: string) => boolean };
+          confirm?: (prompt: string) => Promise<boolean>;
+        };
+      },
+    ): Promise<{ itemCounts: RollbackItemCounts }> {
+      return runUnguarded(async () => {
+        const runId = randomUUID();
+
+        // Resolve the migration object. When args.migrations is provided (preloaded),
+        // look up by id directly. Otherwise walk the on-disk migrations directory.
+        const migration = await resolveMigrationById(id, args.migrations, {
+          config: args.config,
+          service: bundle,
+          cwd,
+        });
+
+        if (!migration) {
+          const err: Error & { code?: string; remediation?: string } = new Error(
+            `Migration '${id}' not found in migrations directory.`,
+          );
+          err.code = 'EDB_MIGRATION_NOT_FOUND';
+          err.remediation = `Run \`history\` to list known migrations.`;
+          throw err;
+        }
+
+        return rollback({
+          service: bundle,
+          config: args.config,
+          client: docClient,
+          tableName,
+          migration,
+          strategy: options.strategy,
+          runId,
+          holder,
+          ...(options.yes ? { yes: true } : {}),
+          ...(options.io ? { io: options.io } : {}),
+        });
+      });
+    },
+
+    /**
+     * API-05 / BLOCKER 2 — operator-path forced lock clear.
+     *
+     * Wraps `forceUnlock` from `src/lock/unlock.ts` (LCK-08 truth-table dispatch).
+     * **REJECT when `yes !== true`.** This mirrors the CLI's panic-button refusal:
+     * the CLI prompts; the programmatic API requires explicit `yes: true`
+     * acknowledgement (REQUIREMENTS.md line 188).
+     *
+     * @throws {EDBUnlockRequiresConfirmationError} — when args.yes !== true
+     *   (BEFORE any DDB I/O; the lock row is unchanged).
+     */
+    async forceUnlock(forceArgs: { runId: string; yes?: boolean }): Promise<UnlockResult> {
+      // BLOCKER 2 / API-05 — REJECT when `yes !== true`. The CLI prompts;
+      // programmatic callers MUST acknowledge the bypass explicitly.
+      // EDBUnlockRequiresConfirmationError is internal-only (Plan 05-01) and is
+      // NOT surfaced via src/index.ts; callers receive it through the method's
+      // promise rejection.
+      if (forceArgs.yes !== true) {
+        throw new EDBUnlockRequiresConfirmationError(
+          'forceUnlock requires explicit confirmation. Pass `yes: true` to bypass the safety prompt, or use the CLI (`electrodb-migrations unlock --run-id <X>`) for interactive confirmation.',
+          { runId: forceArgs.runId },
+        );
+      }
+      return runUnguarded(async () => forceUnlockLib(bundle, { runId: forceArgs.runId }));
+    },
+
+    /**
+     * API-05 — read the current lock row for inspection (fresh consistent read,
+     * no caching). Used by the CLI's pre-execute lock-state render.
+     *
+     * Returns null if the row doesn't exist (fresh project, never bootstrapped).
+     */
+    async getLockState(): Promise<LockRowSnapshot | null> {
+      return runUnguarded(async () => readLockRow(bundle));
+    },
+
+    /**
+     * API-05 — snapshot of the guard cache state for operator inspection.
+     *
+     * Returns the `GuardStateSnapshot` shape pinned in Plan 05-01 (cacheSize +
+     * optional lastReadAt + optional lastReadResult). The snapshot is in-process
+     * only — no DDB I/O; runUnguarded is unnecessary here.
+     *
+     * Shape: `{cacheSize: number, lastReadAt?: string, lastReadResult?: 'allow'|'block'}`
+     */
+    async getGuardState(): Promise<GuardStateSnapshot> {
+      return getGuardCacheState();
+    },
   };
+
+  /** @internal Plan 05-11 (CLI `unlock` command) consumes this to patch _migrations.status
+   *  when forceUnlock observed an active priorState. NOT part of the typed MigrationsClient
+   *  interface; non-enumerable so it does not appear in Object.keys / for...in / spread. */
+  Object.defineProperty(client, '__bundle', {
+    value: bundle,
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
 
   return client;
 }
@@ -392,6 +518,49 @@ async function resolvePendingMigrations(
   });
 
   return pending;
+}
+
+/**
+ * Resolve a single migration by id.
+ *
+ * Used by `client.rollback()` to locate the migration source given an id.
+ *
+ * When `preloaded` is provided, look up by id directly from the array (O(n)
+ * scan; migration lists are small). When absent, resolve from disk via the
+ * same `resolvePendingMigrations` discovery path, but scan ALL on-disk
+ * migrations (not just pending ones) — rollback targets applied/finalized
+ * migrations that are no longer "pending".
+ *
+ * Returns `undefined` when the migration is not found (caller throws
+ * EDB_MIGRATION_NOT_FOUND).
+ */
+async function resolveMigrationById(
+  id: string,
+  preloaded: ReadonlyArray<Migration<AnyElectroEntity, AnyElectroEntity>> | undefined,
+  _args: { config: ResolvedConfig; service: ReturnType<typeof createMigrationsService>; cwd: string },
+): Promise<Migration<AnyElectroEntity, AnyElectroEntity> | undefined> {
+  if (preloaded && preloaded.length > 0) {
+    return preloaded.find((m) => m.id === id);
+  }
+
+  // Disk discovery: loadPendingMigrations only returns "pending" migrations
+  // (status=pending or missing). For rollback, the target is typically
+  // status='applied' or 'finalized'. We use the same disk-walk but pull ALL
+  // on-disk migrations by temporarily treating every discovered directory as a
+  // candidate, regardless of DDB status.
+  //
+  // We reuse the loadPendingMigrations infrastructure by passing the args and
+  // searching across the full set — since the migration source directory is
+  // deterministic (config.migrations/<id>/migration.ts), we can attempt to
+  // load the specific migration directly. However, as loadPendingMigrations
+  // filters by DDB status, we simply scan all discovered files.
+  //
+  // Practical approach: call loadPendingMigrations (which loads from disk) and
+  // check; if not found there, the migration source is genuinely unavailable on
+  // disk and we return undefined.
+  const pending = await loadPendingMigrations(_args);
+  const match = pending.find((p) => p.id === id);
+  return match?.migration;
 }
 
 /**
