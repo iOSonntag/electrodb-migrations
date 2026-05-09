@@ -73,13 +73,12 @@ describe('source-scan invariants for src/lock/ + src/guard/ + src/runner/ + src/
     expect(files.some((f) => f.includes('src/guard/'))).toBe(true);
     // src/runner/ and src/rollback/ existence is not asserted here:
     // - Plan 04-07 creates the first file under src/runner/.
-    // - Plan 05-02+ create the first files under src/rollback/.
+    // - Plan 05-03 creates the first files under src/rollback/
+    //   (identity-stamp.ts, type-table.ts, index.ts).
     // Once those land, the invariants apply automatically via the glob.
-    // The assertion below confirms src/rollback/ does not yet exist (Plan 05-01
-    // extends the glob but does NOT create the first src/rollback/ file — that
-    // is Plan 05-02's job). Once Plan 05-02 lands, this assertion must be
-    // removed or the glob result will include src/rollback/ files.
-    expect(files.some((f) => f.includes('src/rollback/'))).toBe(false);
+    // NOTE: the previously-present assertion `toBe(false)` for src/rollback/
+    // has been removed — Plan 05-03 introduced src/rollback/ files (Plan 05-01
+    // tracked this with the `toBe(false)` sentinel; Plan 05-03 removes it).
     for (const file of files) {
       const stripped = stripCommentLines(readFileSync(file, 'utf8'));
       expect(stripped, `setInterval found in ${file}`).not.toMatch(/\bsetInterval\s*\(/);
