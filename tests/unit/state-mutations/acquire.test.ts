@@ -303,3 +303,153 @@ describe('state-mutations.acquire (LCK-01, LCK-03 conditional shape)', () => {
     expect(cutoffMs).toBeLessThanOrEqual(after - baseConfig.lock.staleThresholdMs);
   });
 });
+
+/**
+ * OQ9 regression tests — parameterized over (mode × lockState).
+ *
+ * Purpose: verify that:
+ * 1. Apply-mode ConditionExpression is UNCHANGED (no `release` or `failed`).
+ * 2. Rollback-mode ConditionExpression is WIDENED (includes `release` AND `failed`).
+ * 3. Both modes still include all four stale-takeover states.
+ *
+ * These are STATIC WHERE-CLAUSE STRING assertions — no DDB roundtrip needed.
+ * The stub captures the rendered condition so tests can inspect which operators
+ * appear inside the composed expression.
+ *
+ * See src/state-mutations/acquire.ts for the full OQ9 design rationale.
+ */
+describe('OQ9 — mode-aware ConditionExpression (apply mode UNCHANGED, rollback mode WIDENED)', () => {
+  // ---------------------------------------------------------------------------
+  // Helper to capture the where condition for a given mode.
+  // ---------------------------------------------------------------------------
+  async function captureCondition(mode: 'apply' | 'rollback' | 'finalize'): Promise<string> {
+    const { service, captured } = makeStubService();
+    await acquire(service as never, baseConfig, { ...baseArgs, mode });
+    return captured[0]?.whereCondition ?? '';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Apply mode — UNCHANGED (no release, no failed in non-stale branches)
+  // ---------------------------------------------------------------------------
+  describe('mode: apply (UNCHANGED)', () => {
+    it('apply-mode condition contains notExists(lockState)', async () => {
+      const condition = await captureCondition('apply');
+      expect(condition).toContain('notExists(lockState)');
+    });
+
+    it('apply-mode condition contains eq(lockState,"free")', async () => {
+      const condition = await captureCondition('apply');
+      expect(condition).toContain('eq(lockState,"free")');
+    });
+
+    it('apply-mode condition contains all four stale-takeover states', async () => {
+      const condition = await captureCondition('apply');
+      expect(condition).toContain('"apply"');
+      expect(condition).toContain('"rollback"');
+      expect(condition).toContain('"finalize"');
+      expect(condition).toContain('"dying"');
+    });
+
+    it('apply-mode condition does NOT contain eq(lockState,"release") (LCK-03)', async () => {
+      const condition = await captureCondition('apply');
+      expect(condition).not.toContain('eq(lockState,"release")');
+    });
+
+    it('apply-mode condition does NOT contain eq(lockState,"failed") (LCK-03)', async () => {
+      const condition = await captureCondition('apply');
+      expect(condition).not.toContain('eq(lockState,"failed")');
+    });
+
+    it('apply-mode smoke: acquire succeeds and emits 2-item transact (no regression)', async () => {
+      const { service, captured, writeFn, goSpy } = makeStubService();
+      await acquire(service as never, baseConfig, { ...baseArgs, mode: 'apply' });
+      expect(writeFn).toHaveBeenCalledTimes(1);
+      expect(goSpy).toHaveBeenCalledTimes(1);
+      expect(captured).toHaveLength(2);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Rollback mode — OQ9 WIDENED (includes release and failed)
+  // ---------------------------------------------------------------------------
+  describe('mode: rollback (OQ9 WIDENED)', () => {
+    it('rollback-mode condition contains notExists(lockState)', async () => {
+      const condition = await captureCondition('rollback');
+      expect(condition).toContain('notExists(lockState)');
+    });
+
+    it('rollback-mode condition contains eq(lockState,"free")', async () => {
+      const condition = await captureCondition('rollback');
+      expect(condition).toContain('eq(lockState,"free")');
+    });
+
+    it('rollback-mode condition contains eq(lockState,"release") [OQ9 NEW]', async () => {
+      const condition = await captureCondition('rollback');
+      expect(condition).toContain('eq(lockState,"release")');
+    });
+
+    it('rollback-mode condition contains eq(lockState,"failed") [OQ9 NEW]', async () => {
+      const condition = await captureCondition('rollback');
+      expect(condition).toContain('eq(lockState,"failed")');
+    });
+
+    it('rollback-mode condition contains all four stale-takeover states (including stale rollback = takeover)', async () => {
+      const condition = await captureCondition('rollback');
+      expect(condition).toContain('"apply"');
+      expect(condition).toContain('"rollback"');
+      expect(condition).toContain('"finalize"');
+      expect(condition).toContain('"dying"');
+    });
+
+    it('rollback-mode condition contains heartbeatAt staleness check', async () => {
+      const condition = await captureCondition('rollback');
+      expect(condition).toContain('lt(heartbeatAt,');
+    });
+
+    it('rollback-mode smoke: acquire succeeds and emits 2-item transact', async () => {
+      const { service, captured, writeFn, goSpy } = makeStubService();
+      await acquire(service as never, baseConfig, { ...baseArgs, mode: 'rollback' });
+      expect(writeFn).toHaveBeenCalledTimes(1);
+      expect(goSpy).toHaveBeenCalledTimes(1);
+      expect(captured).toHaveLength(2);
+    });
+
+    it('rollback-mode: item 0 sets lockState to "rollback"', async () => {
+      const { service, captured } = makeStubService();
+      await acquire(service as never, baseConfig, { ...baseArgs, mode: 'rollback' });
+      expect(captured[0]?.set).toMatchObject({ lockState: 'rollback' });
+    });
+
+    it('rollback-mode throws EDBMigrationLockHeldError on ConditionalCheckFailed (behavioral smoke)', async () => {
+      const cancelled = Object.assign(new Error('Transaction cancelled'), {
+        name: 'TransactionCanceledException',
+        CancellationReasons: [{ Code: 'ConditionalCheckFailed' }, { Code: 'None' }],
+      });
+      const { service } = makeStubService(async () => { throw cancelled; });
+      await expect(
+        acquire(service as never, baseConfig, { ...baseArgs, mode: 'rollback' }),
+      ).rejects.toMatchObject({ code: 'EDB_MIGRATION_LOCK_HELD' });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Finalize mode — same as apply (unchanged)
+  // ---------------------------------------------------------------------------
+  describe('mode: finalize (same as apply — unchanged)', () => {
+    it('finalize-mode condition does NOT contain eq(lockState,"release")', async () => {
+      const condition = await captureCondition('finalize');
+      expect(condition).not.toContain('eq(lockState,"release")');
+    });
+
+    it('finalize-mode condition does NOT contain eq(lockState,"failed")', async () => {
+      const condition = await captureCondition('finalize');
+      expect(condition).not.toContain('eq(lockState,"failed")');
+    });
+
+    it('finalize-mode smoke: acquire succeeds and emits 2-item transact', async () => {
+      const { service, captured } = makeStubService();
+      await acquire(service as never, baseConfig, { ...baseArgs, mode: 'finalize' });
+      expect(captured).toHaveLength(2);
+    });
+  });
+});

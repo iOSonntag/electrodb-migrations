@@ -30,6 +30,7 @@ export interface AcquireArgs {
  *
  * **ConditionExpression on item 0** (LCK-01 + LCK-03):
  *
+ * Apply / finalize mode (UNCHANGED):
  * ```
  * attribute_not_exists(lockState)
  * OR lockState = 'free'
@@ -38,8 +39,26 @@ export interface AcquireArgs {
  *     AND heartbeatAt < :staleCutoff)
  * ```
  *
- * `release` and `failed` are intentionally NOT in the takeover allowlist —
- * those require an explicit `unlock` (LCK-08).
+ * `release` and `failed` are intentionally NOT in the takeover allowlist for
+ * apply/finalize — those require an explicit `unlock` (LCK-08).
+ *
+ * **OQ9 — rollback acquire widening.** When `args.mode === 'rollback'`, the
+ * condition additionally permits `lockState ∈ {release, failed}` (the
+ * post-release lifecycle states) so Case 2 and Case 3 rollback can acquire
+ * the lock without first running `unlock` to clear to `free`. An active
+ * (non-stale) `lockState='rollback'` is still rejected (one rollback at a
+ * time). Apply and finalize modes are unchanged.
+ *
+ * Rollback mode (OQ9 widening):
+ * ```
+ * attribute_not_exists(lockState)
+ * OR lockState = 'free'
+ * OR lockState = 'release'
+ * OR lockState = 'failed'
+ * OR ((lockState = 'apply' OR lockState = 'rollback'
+ *      OR lockState = 'finalize' OR lockState = 'dying')
+ *     AND heartbeatAt < :staleCutoff)
+ * ```
  *
  * **Wave 0 fallback note (Decision A1/A2).** ElectroDB's `op.contains(list, attr)`
  * signature for an IN-clause does not exist (`contains(name, value)` is set/string
@@ -55,6 +74,36 @@ export interface AcquireArgs {
 export async function acquire(service: MigrationsServiceBundle, config: ResolvedConfig, args: AcquireArgs): Promise<void> {
   const now = new Date().toISOString();
   const staleCutoff = new Date(Date.now() - config.lock.staleThresholdMs).toISOString();
+
+  /**
+   * Build the LCK-01 ConditionExpression for the given acquire mode.
+   *
+   * - `apply` / `finalize`: original condition; no scope change.
+   * - `rollback` (OQ9): widened to permit `release` and `failed` so post-release
+   *   Case 2 + Case 3 rollback can acquire. Rejects an active (non-stale)
+   *   `rollback` (one rollback at a time); a stale `rollback` is still
+   *   takeover-eligible via the heartbeatAt branch.
+   *
+   * Inlined here to capture `staleCutoff` from the enclosing scope so
+   * ElectroDB's where-clause type inference is preserved.
+   */
+  function buildAcquireWhereExpression(
+    mode: 'apply' | 'rollback' | 'finalize',
+  ): (attrs: { lockState: unknown; heartbeatAt: unknown }, op: {
+    notExists: (a: unknown) => string;
+    eq: (a: unknown, v: unknown) => string;
+    lt: (a: unknown, v: unknown) => string;
+  }) => string {
+    return ({ lockState, heartbeatAt }, op) => {
+      const free = `${op.notExists(lockState)} OR ${op.eq(lockState, 'free')}`;
+      const stale = `((${op.eq(lockState, 'apply')} OR ${op.eq(lockState, 'rollback')} OR ${op.eq(lockState, 'finalize')} OR ${op.eq(lockState, 'dying')}) AND ${op.lt(heartbeatAt, staleCutoff)})`;
+      if (mode === 'rollback') {
+        // OQ9 — permit release/failed entry for post-release rollback.
+        return `${free} OR ${op.eq(lockState, 'release')} OR ${op.eq(lockState, 'failed')} OR ${stale}`;
+      }
+      return `${free} OR ${stale}`;
+    };
+  }
 
   let result: TransactionWriteResult;
   try {
@@ -74,10 +123,7 @@ export async function acquire(service: MigrationsServiceBundle, config: Resolved
             schemaVersion: STATE_SCHEMA_VERSION,
           })
           .add({ inFlightIds: [args.migId] })
-          .where(
-            ({ lockState, heartbeatAt }, op) =>
-              `${op.notExists(lockState)} OR ${op.eq(lockState, 'free')} OR ((${op.eq(lockState, 'apply')} OR ${op.eq(lockState, 'rollback')} OR ${op.eq(lockState, 'finalize')} OR ${op.eq(lockState, 'dying')}) AND ${op.lt(heartbeatAt, staleCutoff)})`,
-          )
+          .where(buildAcquireWhereExpression(args.mode))
           // ElectroDB v3's `response: 'all_old'` is the typed surface for
           // DDB's `ReturnValuesOnConditionCheckFailure: 'ALL_OLD'` on
           // transactWrite items (see electrodb/src/entity.js:1747-1750).
