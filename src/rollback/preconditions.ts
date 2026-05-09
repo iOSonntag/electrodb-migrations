@@ -196,7 +196,14 @@ export async function checkPreconditions(args: CheckPreconditionsArgs): Promise<
   //
   // Note: Case 1 short-circuits at Step 7 (line ~133) — Step 10 is naturally
   // unreachable for Case 1 (pre-release rollback has no reads-dependency semantic).
-  if (targetRow.reads !== undefined && targetRow.reads.size > 0) {
+  //
+  // Guard: skip the lookup when reads is obviously absent. Do NOT rely on
+  // `targetRow.reads.size > 0` because ElectroDB / the AWS SDK can return
+  // DynamoDB `set` attributes as a plain Array (or a { wrapperName:'Set',
+  // values:[] } wrapper) rather than a JS Set — `.size` would then be
+  // `undefined` and the check would silently pass. Delegate all normalisation
+  // to `findBlockingReadsDependency` which handles all three shapes.
+  if (targetRow.reads !== undefined) {
     const blocking = findBlockingReadsDependency(allRows, targetRow);
     if (blocking !== undefined) {
       const err = new EDBRollbackNotPossibleError(
