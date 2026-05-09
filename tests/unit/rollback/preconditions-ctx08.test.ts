@@ -217,4 +217,174 @@ describe('checkPreconditions CTX-08: reads dependency applied', () => {
       expect(err.details?.reason).toBe('READS_DEPENDENCY_APPLIED');
     }
   });
+
+  // ----- Refusal: finalized reads-target migration also blocks -----
+
+  it('refuses when reads-target has a finalized later-version migration (status=finalized is blocking)', async () => {
+    const stub = makeRollbackStubService();
+
+    const targetRow = makeRow({
+      id: MIG_ID,
+      entityName: 'User',
+      status: 'applied',
+      fromVersion: '1',
+      toVersion: '2',
+      reads: new Set(['Team']),
+    });
+
+    // Team migration that is finalized (not just applied) — still blocking
+    const teamFinalized = makeRow({
+      id: '20260601000007-Team-finalized',
+      entityName: 'Team',
+      status: 'finalized',
+      fromVersion: '2',
+      toVersion: '3',
+    });
+
+    stub.setScanPages(undefined, [targetRow, teamFinalized]);
+    stub.setGetResult(makeFreeLockRow());
+
+    const migration = { ...stub.makeMigration({ hasDown: true }), id: MIG_ID };
+
+    const result = await checkPreconditions({
+      service: stub.service as never,
+      migration: migration as never,
+      strategy: 'projected',
+    });
+
+    expect(result.kind).toBe('refuse');
+    if (result.kind === 'refuse') {
+      const err = result.error as Error & { details?: { reason?: string } };
+      expect(err.details?.reason).toBe('READS_DEPENDENCY_APPLIED');
+    }
+  });
+
+  // ----- Proceed: reverted reads-target migration is NOT blocking -----
+
+  it('proceeds when reads-target has a reverted later-version migration (reverted is not blocking)', async () => {
+    const stub = makeRollbackStubService();
+
+    const targetRow = makeRow({
+      id: MIG_ID,
+      entityName: 'User',
+      status: 'applied',
+      fromVersion: '1',
+      toVersion: '2',
+      reads: new Set(['Team']),
+    });
+
+    // Team migration was applied then reverted — no longer an active dependency
+    const teamReverted = makeRow({
+      id: '20260601000007-Team-reverted',
+      entityName: 'Team',
+      status: 'reverted',
+      fromVersion: '2',
+      toVersion: '3',
+    });
+
+    stub.setScanPages(undefined, [targetRow, teamReverted]);
+    stub.setGetResult(makeFreeLockRow());
+
+    const migration = { ...stub.makeMigration({ hasDown: true }), id: MIG_ID };
+
+    const result = await checkPreconditions({
+      service: stub.service as never,
+      migration: migration as never,
+      strategy: 'projected',
+    });
+
+    expect(result.kind).toBe('proceed');
+  });
+
+  // ----- Remediation message includes blocking migration id and 'first' -----
+
+  it('error remediation mentions the blocking migration id and the word "first"', async () => {
+    const stub = makeRollbackStubService();
+
+    const targetRow = makeRow({
+      id: MIG_ID,
+      entityName: 'User',
+      status: 'applied',
+      fromVersion: '1',
+      toVersion: '2',
+      reads: new Set(['Team']),
+    });
+
+    const blockingTeamId = '20260601000007-Team-add-tier';
+    const teamRow = makeRow({
+      id: blockingTeamId,
+      entityName: 'Team',
+      status: 'applied',
+      fromVersion: '2',
+      toVersion: '3',
+    });
+
+    stub.setScanPages(undefined, [targetRow, teamRow]);
+    stub.setGetResult(makeFreeLockRow());
+
+    const migration = { ...stub.makeMigration({ hasDown: true }), id: MIG_ID };
+
+    const result = await checkPreconditions({
+      service: stub.service as never,
+      migration: migration as never,
+      strategy: 'projected',
+    });
+
+    expect(result.kind).toBe('refuse');
+    if (result.kind === 'refuse') {
+      const err = result.error as Error & { remediation?: string };
+      expect(err.remediation).toContain(blockingTeamId);
+      expect(err.remediation?.toLowerCase()).toContain('first');
+    }
+  });
+
+  // ----- Earliest blocker is reported when multiple blockers exist -----
+
+  it('reports the EARLIEST blocker (lowest fromVersion) when multiple reads-target migrations block', async () => {
+    const stub = makeRollbackStubService();
+
+    const targetRow = makeRow({
+      id: MIG_ID,
+      entityName: 'User',
+      status: 'applied',
+      fromVersion: '1',
+      toVersion: '2',
+      reads: new Set(['Team']),
+    });
+
+    // Two blocking Team migrations — fromVersion 3 and 2. Helper sorts ascending so fromVersion=2 is earliest.
+    const teamLater4 = makeRow({
+      id: '20260601000009-Team-v4',
+      entityName: 'Team',
+      status: 'applied',
+      fromVersion: '3',
+      toVersion: '4',
+    });
+    const teamLater3 = makeRow({
+      id: '20260601000008-Team-v3',
+      entityName: 'Team',
+      status: 'applied',
+      fromVersion: '2',
+      toVersion: '3',
+    });
+
+    // Order in the scan is reversed (latest first) — helper sorts ascending by fromVersion.
+    stub.setScanPages(undefined, [targetRow, teamLater4, teamLater3]);
+    stub.setGetResult(makeFreeLockRow());
+
+    const migration = { ...stub.makeMigration({ hasDown: true }), id: MIG_ID };
+
+    const result = await checkPreconditions({
+      service: stub.service as never,
+      migration: migration as never,
+      strategy: 'projected',
+    });
+
+    expect(result.kind).toBe('refuse');
+    if (result.kind === 'refuse') {
+      const err = result.error as Error & { details?: { blockingMigration?: string } };
+      // The earliest blocker (fromVersion=2) is reported so the user fixes it first.
+      expect(err.details?.blockingMigration).toBe('20260601000008-Team-v3');
+    }
+  });
 });
