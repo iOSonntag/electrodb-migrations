@@ -28,6 +28,14 @@ export interface IterateV1RecordsOptions {
  *
  * **Memory:** Buffers AT MOST one page (≤`pageSize` records) in memory.
  * Million-row migrations don't OOM.
+ *
+ * **Consistency:** Pages are read with `consistent: true`. The migration's
+ * correctness depends on seeing every v1 record before finalize reaps them;
+ * an eventually-consistent scan could miss an in-flight write that hadn't
+ * propagated yet, leaving an orphan v1 record that finalize would later
+ * delete. DynamoDB does not support strongly-consistent scans on GSIs, so
+ * this requires the v1 entity's primary index to be the table's primary
+ * key — which is the canonical ElectroDB pattern (WR-09).
  */
 export async function* iterateV1Records(
   migration: Migration<AnyElectroEntity, AnyElectroEntity>,
@@ -35,11 +43,17 @@ export async function* iterateV1Records(
 ): AsyncGenerator<readonly Record<string, unknown>[]> {
   const limit = options.pageSize ?? 100;
   const v1 = migration.from as unknown as {
-    scan: { go: (opts: { cursor?: string | null; limit?: number }) => Promise<{ data: Record<string, unknown>[]; cursor: string | null }> };
+    scan: {
+      go: (opts: {
+        cursor?: string | null;
+        limit?: number;
+        consistent?: boolean;
+      }) => Promise<{ data: Record<string, unknown>[]; cursor: string | null }>;
+    };
   };
   let cursor: string | null = null;
   do {
-    const page = await v1.scan.go({ cursor, limit });
+    const page = await v1.scan.go({ cursor, limit, consistent: true });
     if (page.data.length > 0) yield page.data;
     cursor = page.cursor;
     if (options.onPage) await options.onPage();
