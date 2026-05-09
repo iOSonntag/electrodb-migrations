@@ -66,12 +66,16 @@ export async function applyFlow(args: ApplyFlowArgs): Promise<ApplyFlowResult> {
     // failed state. The row was PUT in `applyFlowScanWrite` before the loop, so it
     // should exist. If the PUT itself failed (corner case), this patch will also fail
     // — that's acceptable because the lock's `failedIds` set (written by `markFailed`)
-    // already surfaces the failure to the operator.
+    // already surfaces the failure to the operator. WR-11: log the cause to stderr so
+    // an operator debugging from the lock row also sees credential / throttle / outage
+    // errors that would otherwise be silently swallowed.
     await args.service.migrations
       .patch({ id: args.migration.id })
       .set({ status: 'failed' })
       .go()
-      .catch(() => {
+      .catch((patchErr: unknown) => {
+        // eslint-disable-next-line no-console -- diagnostic only; matches markFailed disposition above
+        console.error('[electrodb-migrations] applyFlow: post-error _migrations patch rejected:', patchErr);
         // Non-fatal: the lock row's failedIds is the authoritative failure surface.
       });
 
