@@ -153,3 +153,17 @@ None - no external service configuration required.
 ---
 *Phase: 06-cross-entity-reads*
 *Completed: 2026-05-09*
+
+## Self-Check: PASSED
+
+| Check | Result |
+|-------|--------|
+| `tests/integration/ctx/_helpers.ts` | FOUND |
+| `tests/integration/ctx/ctx-read.test.ts` | FOUND |
+| `tests/integration/ctx/ctx-audit-row.test.ts` | FOUND |
+| `tests/integration/rollback/ctx08-refusal.test.ts` | FOUND |
+| `src/rollback/preconditions.ts` | FOUND |
+| Commit `0d80f38` (Task 1) | FOUND |
+| Commit `26bb2cd` (Task 2) | FOUND |
+| Commit `7ffa5e7` (Task 3) | FOUND |
+| Commit `8e2d22e` (SUMMARY) | FOUND |
