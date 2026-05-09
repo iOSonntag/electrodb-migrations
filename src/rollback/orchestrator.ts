@@ -11,6 +11,13 @@
  *   4. `audit.assertInvariant()` BEFORE `transitionToReleaseMode` (RBK-12 / Pitfall 4).
  *   5. `sched.stop()` in `finally{}` — ALWAYS runs (Pitfall 4 / Pitfall 10).
  *
+ * **Phase 6 — Order invariants update (CTX-01, RESEARCH §A6):**
+ *   - `buildCtx(...)` runs ONLY for Case 2 / Case 3 dispatch (after sleep, before strategy).
+ *   - Case 1 skips buildCtx — case-1-flow does not call `migration.down` or
+ *     any user code that could touch `ctx.entity(...)`.
+ *   - Snapshot strategy receives no ctx — it does not call down.
+ *   - Projected, fill-only, custom strategies all receive `ctx` and forward to `migration.down(record, ctx)`.
+ *
  * **OQ9 (Plan 05-01):** `acquireLock({mode:'rollback'})` permits entry from
  * `{free, release, failed, active-stale}` states — the orchestrator does NOT
  * need to gate on lockState. Case 2 and Case 3 rollbacks work without a
@@ -59,6 +66,8 @@ import { executeSnapshot, type ExecuteSnapshotArgs } from './strategies/snapshot
 import { executeFillOnly } from './strategies/fill-only.js';
 import { executeCustom } from './strategies/custom.js';
 import { rollbackCase1 } from './case-1-flow.js';
+import { buildCtx } from '../ctx/index.js';
+import type { MigrationCtx } from '../ctx/types.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -87,6 +96,11 @@ export interface RollbackArgs {
   yes?: boolean;
   /** stderr writer + confirm injection for `executeSnapshot` (WARNING 4 — pass by reference). */
   io?: ExecuteSnapshotArgs['io'];
+  /**
+   * The user's project root for snapshot resolution (Phase 6). Defaults to
+   * `process.cwd()` if absent. Plumbed from `MigrationsClient.rollback()`.
+   */
+  cwd?: string;
 }
 
 /**
@@ -189,7 +203,9 @@ export async function rollback(args: RollbackArgs): Promise<RollbackResult> {
     // -----------------------------------------------------------------------
     if (decision.case === 'case-1') {
       // Case 1: pre-release, lossless — delete v2 records; v1 is intact.
-      // migration.down is NOT required (RBK-03).
+      // migration.down is NOT required (RBK-03). ctx is not built — Case 1 never
+      // reads cross-entity (case-1-flow.ts does not invoke `migration.down` or
+      // any user code that could call `ctx.entity(...)`).
       await rollbackCase1({
         migration: args.migration,
         client: args.client,
@@ -197,18 +213,33 @@ export async function rollback(args: RollbackArgs): Promise<RollbackResult> {
         audit,
       });
     } else {
-      // Case 2 or Case 3: strategy-driven, type-table-classified.
+      // Case 2 or Case 3: strategy-driven. Build ctx now (eager pre-flight may
+      // throw EDBStaleEntityReadError before any v1-write). ctx is inside the
+      // try{} block so if buildCtx throws, markFailed runs in catch and
+      // sched.stop runs in finally — same error path as any strategy failure.
+      //
+      // Phase 6 / CTX-01: buildCtx runs AFTER the LCK-04 wait window so
+      // strategy executors receive a typed `MigrationCtx` to forward to
+      // `migration.down(record, ctx)`.
+      const ctx: MigrationCtx = await buildCtx(
+        args.migration,
+        args.client,
+        args.tableName,
+        args.cwd ?? process.cwd(),
+      );
+
       const classify = classifyTypeTable({
         migration: args.migration,
       });
 
       switch (args.strategy) {
         case 'projected':
-          await executeProjected({ classify, migration: args.migration, client: args.client, tableName: args.tableName, audit });
+          await executeProjected({ classify, migration: args.migration, client: args.client, tableName: args.tableName, audit, ctx });
           break;
         case 'snapshot':
           // WARNING 4 — pass args.io by reference (NOT a copy or wrapper).
           // The unit test asserts `capturedArgs.io.confirm === args.io.confirm`.
+          // Snapshot strategy does NOT call down — ctx is not threaded.
           await executeSnapshot({
             classify,
             migration: args.migration,
@@ -220,10 +251,10 @@ export async function rollback(args: RollbackArgs): Promise<RollbackResult> {
           });
           break;
         case 'fill-only':
-          await executeFillOnly({ classify, migration: args.migration, client: args.client, tableName: args.tableName, audit });
+          await executeFillOnly({ classify, migration: args.migration, client: args.client, tableName: args.tableName, audit, ctx });
           break;
         case 'custom':
-          await executeCustom({ classify, migration: args.migration, client: args.client, tableName: args.tableName, audit });
+          await executeCustom({ classify, migration: args.migration, client: args.client, tableName: args.tableName, audit, ctx });
           break;
         default: {
           const exhaustive: never = args.strategy;

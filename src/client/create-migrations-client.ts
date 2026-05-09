@@ -400,6 +400,7 @@ export function createMigrationsClient(args: CreateMigrationsClientArgs): Migrat
           strategy: options.strategy,
           runId,
           holder,
+          cwd,  // Phase 6: thread cwd for buildCtx snapshot resolution
           ...(options.yes ? { yes: true } : {}),
           ...(options.io ? { io: options.io } : {}),
         });

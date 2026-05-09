@@ -40,6 +40,7 @@ const {
   mockExecuteFillOnly,
   mockExecuteCustom,
   mockRollbackCase1,
+  mockBuildCtx,
 } = vi.hoisted(() => {
   const mockAcquireLock = vi.fn(async () => {});
   const mockStopFn = vi.fn(async () => {});
@@ -55,6 +56,8 @@ const {
   const mockExecuteFillOnly = vi.fn(async () => {});
   const mockExecuteCustom = vi.fn(async () => {});
   const mockRollbackCase1 = vi.fn(async () => ({}));
+  // Phase 6 / CTX-01 — mock buildCtx so orchestrator tests don't need snapshot files
+  const mockBuildCtx = vi.fn(async () => ({ entity: vi.fn() }));
   return {
     mockAcquireLock,
     mockStopFn,
@@ -70,6 +73,7 @@ const {
     mockExecuteFillOnly,
     mockExecuteCustom,
     mockRollbackCase1,
+    mockBuildCtx,
   };
 });
 
@@ -117,6 +121,11 @@ vi.mock('../../../src/rollback/strategies/custom.js', () => ({
 
 vi.mock('../../../src/rollback/case-1-flow.js', () => ({
   rollbackCase1: mockRollbackCase1,
+}));
+
+// Phase 6 / CTX-01 — mock buildCtx so orchestrator tests don't need snapshot files on disk
+vi.mock('../../../src/ctx/index.js', () => ({
+  buildCtx: mockBuildCtx,
 }));
 
 // ---------------------------------------------------------------------------
@@ -235,6 +244,8 @@ describe('rollback orchestrator (RBK-02..12)', () => {
     mockExecuteFillOnly.mockResolvedValue(undefined);
     mockExecuteCustom.mockResolvedValue(undefined);
     mockClassifyTypeTable.mockReturnValue((async function* () {})());
+    // Phase 6 / CTX-01 — buildCtx returns a fake ctx object
+    mockBuildCtx.mockResolvedValue({ entity: vi.fn() });
 
     const defaultAudit = makeAuditStub();
     mockCreateRollbackAudit.mockReturnValue(defaultAudit);
@@ -501,5 +512,131 @@ describe('rollback orchestrator (RBK-02..12)', () => {
       expect.anything(),
       expect.objectContaining({ mode: 'rollback', migId: 'test-migration-id', runId: 'run-001', holder: 'test-host:1234' }),
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // RB-17 (CTX-01): buildCtx only called for case-2/case-3; skipped for case-1
+  // -------------------------------------------------------------------------
+
+  it('RB-17: buildCtx NOT called for case-1; called once for case-2 (CTX-01 + RESEARCH §A6)', async () => {
+    // Case 1: buildCtx must NOT be called (case-1 never calls down)
+    mockCheckPreconditions.mockResolvedValue(makeProceedDecision('case-1'));
+    await rollback(makeArgs());
+    expect(mockBuildCtx).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    mockAcquireLock.mockResolvedValue(undefined);
+    mockMarkFailed.mockResolvedValue(undefined);
+    mockTransitionToReleaseMode.mockResolvedValue(undefined);
+    mockSleep.mockResolvedValue(undefined);
+    mockStartLockHeartbeat.mockReturnValue({ stop: mockStopFn });
+    mockStopFn.mockResolvedValue(undefined);
+    mockExecuteProjected.mockResolvedValue(undefined);
+    mockClassifyTypeTable.mockReturnValue((async function* () {})());
+    mockBuildCtx.mockResolvedValue({ entity: vi.fn() });
+    mockCreateRollbackAudit.mockReturnValue(makeAuditStub());
+
+    // Case 2: buildCtx MUST be called once with (migration, client, tableName, cwd)
+    mockCheckPreconditions.mockResolvedValue(makeProceedDecision('case-2'));
+    await rollback(makeArgs({ strategy: 'projected' }));
+    expect(mockBuildCtx).toHaveBeenCalledTimes(1);
+    expect(mockBuildCtx).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'test-migration-id' }),
+      expect.anything(),
+      'test-table',
+      expect.any(String),
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // RB-18 (CTX-01): ctx passed to projected/fill-only/custom; NOT to snapshot/case-1
+  // -------------------------------------------------------------------------
+
+  it('RB-18: ctx passed to executeProjected, executeFillOnly, executeCustom (CTX-01); NOT to executeSnapshot or rollbackCase1', async () => {
+    const fakeCtxObject = { entity: vi.fn() };
+    mockBuildCtx.mockResolvedValue(fakeCtxObject);
+
+    // projected — ctx present
+    mockCheckPreconditions.mockResolvedValue(makeProceedDecision('case-2'));
+    mockClassifyTypeTable.mockReturnValue((async function* () {})());
+    mockExecuteProjected.mockResolvedValue(undefined);
+    await rollback(makeArgs({ strategy: 'projected' }));
+    expect(mockExecuteProjected).toHaveBeenCalledWith(
+      expect.objectContaining({ ctx: fakeCtxObject }),
+    );
+
+    vi.clearAllMocks();
+    mockAcquireLock.mockResolvedValue(undefined);
+    mockMarkFailed.mockResolvedValue(undefined);
+    mockTransitionToReleaseMode.mockResolvedValue(undefined);
+    mockSleep.mockResolvedValue(undefined);
+    mockStartLockHeartbeat.mockReturnValue({ stop: mockStopFn });
+    mockStopFn.mockResolvedValue(undefined);
+    mockBuildCtx.mockResolvedValue(fakeCtxObject);
+    mockClassifyTypeTable.mockReturnValue((async function* () {})());
+    mockCreateRollbackAudit.mockReturnValue(makeAuditStub());
+
+    // fill-only — ctx present
+    mockCheckPreconditions.mockResolvedValue(makeProceedDecision('case-2'));
+    mockExecuteFillOnly.mockResolvedValue(undefined);
+    await rollback(makeArgs({ strategy: 'fill-only' }));
+    expect(mockExecuteFillOnly).toHaveBeenCalledWith(
+      expect.objectContaining({ ctx: fakeCtxObject }),
+    );
+
+    vi.clearAllMocks();
+    mockAcquireLock.mockResolvedValue(undefined);
+    mockMarkFailed.mockResolvedValue(undefined);
+    mockTransitionToReleaseMode.mockResolvedValue(undefined);
+    mockSleep.mockResolvedValue(undefined);
+    mockStartLockHeartbeat.mockReturnValue({ stop: mockStopFn });
+    mockStopFn.mockResolvedValue(undefined);
+    mockBuildCtx.mockResolvedValue(fakeCtxObject);
+    mockClassifyTypeTable.mockReturnValue((async function* () {})());
+    mockCreateRollbackAudit.mockReturnValue(makeAuditStub());
+
+    // custom — ctx present
+    mockCheckPreconditions.mockResolvedValue(makeProceedDecision('case-2'));
+    mockExecuteCustom.mockResolvedValue(undefined);
+    await rollback(makeArgs({ strategy: 'custom' }));
+    expect(mockExecuteCustom).toHaveBeenCalledWith(
+      expect.objectContaining({ ctx: fakeCtxObject }),
+    );
+
+    vi.clearAllMocks();
+    mockAcquireLock.mockResolvedValue(undefined);
+    mockMarkFailed.mockResolvedValue(undefined);
+    mockTransitionToReleaseMode.mockResolvedValue(undefined);
+    mockSleep.mockResolvedValue(undefined);
+    mockStartLockHeartbeat.mockReturnValue({ stop: mockStopFn });
+    mockStopFn.mockResolvedValue(undefined);
+    mockBuildCtx.mockResolvedValue(fakeCtxObject);
+    mockClassifyTypeTable.mockReturnValue((async function* () {})());
+    mockCreateRollbackAudit.mockReturnValue(makeAuditStub());
+
+    // snapshot — ctx NOT present
+    mockCheckPreconditions.mockResolvedValue(makeProceedDecision('case-2'));
+    mockExecuteSnapshot.mockResolvedValue(undefined);
+    await rollback(makeArgs({ strategy: 'snapshot' }));
+    const snapshotCallArgs = mockExecuteSnapshot.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(snapshotCallArgs[0]).not.toHaveProperty('ctx');
+
+    vi.clearAllMocks();
+    mockAcquireLock.mockResolvedValue(undefined);
+    mockMarkFailed.mockResolvedValue(undefined);
+    mockTransitionToReleaseMode.mockResolvedValue(undefined);
+    mockSleep.mockResolvedValue(undefined);
+    mockStartLockHeartbeat.mockReturnValue({ stop: mockStopFn });
+    mockStopFn.mockResolvedValue(undefined);
+    mockBuildCtx.mockResolvedValue(fakeCtxObject);
+    mockRollbackCase1.mockResolvedValue({});
+    mockCreateRollbackAudit.mockReturnValue(makeAuditStub());
+
+    // case-1 — rollbackCase1 args don't have ctx, buildCtx not called
+    mockCheckPreconditions.mockResolvedValue(makeProceedDecision('case-1'));
+    await rollback(makeArgs());
+    expect(mockBuildCtx).not.toHaveBeenCalled();
+    const case1CallArgs = mockRollbackCase1.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(case1CallArgs[0]).not.toHaveProperty('ctx');
   });
 });
