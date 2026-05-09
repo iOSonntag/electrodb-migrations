@@ -113,9 +113,9 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. `npx electrodb-migrations unlock --run-id <runId>` requires `--run-id` even with `--yes`; the interactive prompt shows `lockState`, `lockHolder`, `lockRunId`, `heartbeatAt`, and elapsed runtime before confirmation; clearing a `lockState='apply'` lock marks the migration `failed`, clearing a `lockState='release'` lock is equivalent to `release`, and clearing a `lockState='finalize'` lock marks the finalize `failed`.
 **Plans**: 11 plans across 5 waves
   - [x] 05-01-PLAN.md — Wave 0: test-infrastructure (4 fixture migrations, 2 seed helpers, integration bootstrap, unit stub, EDBRollbackCountMismatchError, source-scan glob extension to src/rollback/) — RBK-12
-  - [ ] 05-02-PLAN.md — Wave 1: preconditions + lifecycle-case + head-only (TDD; refusal truth-table dispatch) — RBK-01, RBK-09, RBK-10
-  - [ ] 05-03-PLAN.md — Wave 1: identity-stamp utilities + type-table classifier + STD safety integration test (TDD) — RBK-04, RBK-11
-  - [ ] 05-04-PLAN.md — Wave 1: rollback audit + resolver-validate + heterogeneous batch-flush (TDD; the plumbing layer) — RBK-08 (partial), RBK-12
+  - [x] 05-02-PLAN.md — Wave 1: preconditions + lifecycle-case + head-only (TDD; refusal truth-table dispatch) — RBK-01, RBK-09, RBK-10
+  - [x] 05-03-PLAN.md — Wave 1: identity-stamp utilities + type-table classifier + STD safety integration test (TDD) — RBK-04, RBK-11
+  - [x] 05-04-PLAN.md — Wave 1: rollback audit + resolver-validate + heterogeneous batch-flush (TDD; the plumbing layer) — RBK-08 (partial), RBK-12
   - [ ] 05-05-PLAN.md — Wave 2: strategy executors projected + fill-only (TDD; both require down) — RBK-05, RBK-07
   - [ ] 05-06-PLAN.md — Wave 2: strategy executor snapshot + DATA-LOSS warning (TDD; B/C count prompt; --yes audit trail) — RBK-06
   - [ ] 05-07-PLAN.md — Wave 2: strategy executor custom + rollbackResolver type tightening (TDD; per-record resolver dispatch; Pitfall 3 schema-validation) — RBK-08
