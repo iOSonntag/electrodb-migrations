@@ -32,6 +32,7 @@ export {
   type ClassifyTypeTableArgs,
 } from './type-table.js';
 
-// Wave 2 strategy executors (RBK-05 / RBK-07)
-export { executeProjected, type ExecuteStrategyArgs } from './strategies/projected.js';
-export { executeFillOnly } from './strategies/fill-only.js';
+// Wave 2 strategy executors
+export { executeProjected, type ExecuteStrategyArgs } from './strategies/projected.js'; // RBK-05
+export { executeFillOnly } from './strategies/fill-only.js'; // RBK-07
+export { executeSnapshot, type ExecuteSnapshotArgs } from './strategies/snapshot.js'; // RBK-06
