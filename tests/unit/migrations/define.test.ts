@@ -32,7 +32,7 @@ describe('defineMigration (SCF-03 + Migration<F, T> surface)', () => {
         return rest;
       },
       reads: [otherEntity],
-      rollbackResolver: () => 'projected',
+      rollbackResolver: async (_args) => null,
     };
     const out = defineMigration(input);
     expect(out).toBe(input);

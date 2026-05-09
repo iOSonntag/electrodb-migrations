@@ -36,7 +36,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createMigrationsClient } from '../../../src/client/index.js';
 import { runUnguarded } from '../../../src/guard/index.js';
-import type { AnyElectroEntity } from '../../../src/migrations/types.js';
+import type { AnyElectroEntity, RollbackResolverArgs } from '../../../src/migrations/types.js';
 import { isDdbLocalReachable, skipMessage } from '../_helpers/index.js';
 import { type ApplyTestTableSetup, setupApplyTestTable } from './_helpers.js';
 
@@ -122,7 +122,7 @@ interface AuditRowShapeCase {
    */
   buildMigration: (setup: ApplyTestTableSetup) => ApplyTestTableSetup['migration'] & {
     down?: (record: unknown, ctx?: unknown) => Promise<unknown>;
-    rollbackResolver?: (...args: unknown[]) => unknown;
+    rollbackResolver?: (args: RollbackResolverArgs) => Promise<Record<string, unknown> | null | undefined>;
     reads?: ReadonlyArray<AnyElectroEntity>;
   };
   /** Assert the three case-specific flag/reads shapes on the read-back row. */
@@ -143,11 +143,11 @@ const cases: ReadonlyArray<AuditRowShapeCase> = [
           const { status: _status, ...rest } = record as Record<string, unknown>;
           return rest;
         },
-        rollbackResolver: () => null,
+        rollbackResolver: async (_args: RollbackResolverArgs) => null,
         reads: [setup.v2Entity],
       }) as typeof setup.migration & {
         down: (record: unknown, ctx?: unknown) => Promise<unknown>;
-        rollbackResolver: (...args: unknown[]) => unknown;
+        rollbackResolver: (args: RollbackResolverArgs) => Promise<Record<string, unknown> | null | undefined>;
         reads: ReadonlyArray<AnyElectroEntity>;
       },
     expectShape: (r) => {

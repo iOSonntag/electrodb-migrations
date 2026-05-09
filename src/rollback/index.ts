@@ -36,3 +36,8 @@ export {
 export { executeProjected, type ExecuteStrategyArgs } from './strategies/projected.js'; // RBK-05
 export { executeFillOnly } from './strategies/fill-only.js'; // RBK-07
 export { executeSnapshot, type ExecuteSnapshotArgs } from './strategies/snapshot.js'; // RBK-06
+export { executeCustom, type ExecuteCustomArgs } from './strategies/custom.js'; // RBK-08
+
+// RollbackResolverArgs is exported from src/migrations/types.ts; re-export
+// here so rollback consumers can import everything from one place.
+export type { RollbackResolverArgs } from '../migrations/types.js';
