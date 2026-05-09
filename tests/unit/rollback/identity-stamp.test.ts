@@ -19,9 +19,10 @@ import { createUserV1, createUserV2 } from '../../_helpers/sample-migrations/Use
 // ---------------------------------------------------------------------------
 // Minimal stub DDB doc client — ElectroDB Entity constructors require a
 // client reference but ownsItem / parse / schema access does NOT call DDB.
+// The `send` function is required by ElectroDB's client validation.
 // ---------------------------------------------------------------------------
 // biome-ignore lint/suspicious/noExplicitAny: minimal stub — only the constructor shape matters
-const stubClient = {} as any;
+const stubClient = { send: () => {} } as any;
 const STUB_TABLE = 'stub-table';
 
 // ---------------------------------------------------------------------------
