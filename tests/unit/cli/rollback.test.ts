@@ -129,8 +129,8 @@ describe('registerRollbackCommand — commander argument parsing', () => {
 
     expect(fakeRollback).toHaveBeenCalledWith('mig-1', expect.objectContaining({ strategy: 'projected' }));
     // yes is omitted when false (spreads an empty object)
-    const callArgs = fakeRollback.mock.calls[0][1] as { strategy: string; yes?: boolean };
-    expect(callArgs.yes).toBeUndefined();
+    const callArgs = fakeRollback.mock.calls[0]?.[1] as { strategy: string; yes?: boolean } | undefined;
+    expect(callArgs?.yes).toBeUndefined();
   });
 
   it('RB-02: --strategy snapshot is parsed correctly', async () => {

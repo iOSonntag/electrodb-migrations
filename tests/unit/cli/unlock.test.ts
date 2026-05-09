@@ -420,8 +420,8 @@ describe('runUnlock — BLOCKER 3 OQ2 patch', () => {
 
     // console.error was called with the failure message
     expect(consoleSpy).toHaveBeenCalled();
-    const consoleArgs = consoleSpy.mock.calls[0];
-    expect(String(consoleArgs[0])).toContain('mig-X');
+    const consoleArgs = consoleSpy.mock.calls[0] ?? [];
+    expect(String(consoleArgs[0] ?? '')).toContain('mig-X');
 
     // Warning message is still logged to stderr
     const stderr = stderrChunks.join('');
@@ -468,7 +468,11 @@ describe('runUnlock — BLOCKER 3 OQ2 patch', () => {
     const patchFn = vi.fn();
     const { client } = makeClient({
       getLockState: vi.fn().mockResolvedValue(
-        makeActiveLockRow({ lockState: 'apply', lockMigrationId: undefined }),
+        // omit lockMigrationId entirely so it is absent on the snapshot (exactOptionalPropertyTypes)
+        (() => {
+          const { lockMigrationId: _omit, ...rest } = makeActiveLockRow({ lockState: 'apply' });
+          return rest as typeof rest & { lockMigrationId?: string };
+        })(),
       ),
       forceUnlock: vi.fn().mockResolvedValue({ priorState: 'apply' }),
       bundleMigrationsPatch: patchFn,
