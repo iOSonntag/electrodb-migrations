@@ -16,6 +16,7 @@ import { executeProjected } from '../../../../src/rollback/strategies/projected.
 import { createRollbackAudit } from '../../../../src/rollback/audit.js';
 import { makeRollbackStubService } from '../_stub-service.js';
 import type { TypeTableEntry } from '../../../../src/rollback/type-table.js';
+import type { MigrationCtx } from '../../../../src/ctx/types.js';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -53,6 +54,16 @@ function makeTypeC(id: string): TypeTableEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Shared fake ctx (Phase 6 / CTX-01 retrofit)
+// ---------------------------------------------------------------------------
+
+function makeFakeCtx(): MigrationCtx {
+  return {
+    entity: vi.fn(() => { throw new Error('test should not call ctx.entity'); }) as never,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -61,6 +72,7 @@ describe('executeProjected', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
     await executeProjected({
       classify: makeClassifier([]),
@@ -68,6 +80,7 @@ describe('executeProjected', () => {
       client: stub.client as never,
       tableName: 'test-table',
       audit,
+      ctx: fakeCtx,
     });
 
     const counts = audit.snapshot();
@@ -83,8 +96,9 @@ describe('executeProjected', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
-    const downSpy = vi.fn(async (record: unknown) => {
+    const downSpy = vi.fn(async (record: unknown, _ctx?: unknown) => {
       const r = record as Record<string, unknown>;
       const { status: _s, ...v1Shape } = r;
       return v1Shape;
@@ -99,6 +113,7 @@ describe('executeProjected', () => {
       client: stub.client as never,
       tableName: 'test-table',
       audit,
+      ctx: fakeCtx,
     });
 
     expect(downSpy.mock.calls).toHaveLength(5);
@@ -115,8 +130,9 @@ describe('executeProjected', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
-    const downSpy = vi.fn(async (record: unknown) => {
+    const downSpy = vi.fn(async (record: unknown, _ctx?: unknown) => {
       const r = record as Record<string, unknown>;
       const { status: _s, ...v1Shape } = r;
       return v1Shape;
@@ -137,6 +153,7 @@ describe('executeProjected', () => {
       client: stub.client as never,
       tableName: 'test-table',
       audit,
+      ctx: fakeCtx,
     });
 
     expect(downSpy.mock.calls).toHaveLength(5);
@@ -151,6 +168,7 @@ describe('executeProjected', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
     const downSpy = vi.fn();
     (migration as Record<string, unknown>).down = downSpy;
@@ -163,6 +181,7 @@ describe('executeProjected', () => {
       client: stub.client as never,
       tableName: 'test-table',
       audit,
+      ctx: fakeCtx,
     });
 
     expect(downSpy.mock.calls).toHaveLength(0);
@@ -177,8 +196,9 @@ describe('executeProjected', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
-    const downSpy = vi.fn(async (record: unknown) => {
+    const downSpy = vi.fn(async (record: unknown, _ctx?: unknown) => {
       const r = record as Record<string, unknown>;
       const { status: _s, ...v1Shape } = r;
       return v1Shape;
@@ -199,6 +219,7 @@ describe('executeProjected', () => {
       client: stub.client as never,
       tableName: 'test-table',
       audit,
+      ctx: fakeCtx,
     });
 
     expect(downSpy.mock.calls).toHaveLength(3);
@@ -213,9 +234,10 @@ describe('executeProjected', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
     let callCount = 0;
-    const downSpy = vi.fn(async (record: unknown) => {
+    const downSpy = vi.fn(async (record: unknown, _ctx?: unknown) => {
       callCount++;
       if (callCount === 3) {
         throw new Error('down failed on record 3');
@@ -235,6 +257,7 @@ describe('executeProjected', () => {
         client: stub.client as never,
         tableName: 'test-table',
         audit,
+        ctx: fakeCtx,
       }),
     ).rejects.toThrow('down failed on record 3');
 
@@ -250,9 +273,10 @@ describe('executeProjected', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
     let callCount = 0;
-    const downSpy = vi.fn(async (record: unknown) => {
+    const downSpy = vi.fn(async (record: unknown, _ctx?: unknown) => {
       callCount++;
       if (callCount === 2) {
         return null; // OQ-2 mirror: down returning null → skip
@@ -271,6 +295,7 @@ describe('executeProjected', () => {
       client: stub.client as never,
       tableName: 'test-table',
       audit,
+      ctx: fakeCtx,
     });
 
     const counts = audit.snapshot();
@@ -285,9 +310,10 @@ describe('executeProjected', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
     const capturedArgs: unknown[] = [];
-    const downSpy = vi.fn(async (record: unknown) => {
+    const downSpy = vi.fn(async (record: unknown, _ctx?: unknown) => {
       capturedArgs.push(record);
       const r = record as Record<string, unknown>;
       const { status: _s, ...v1Shape } = r;
@@ -303,6 +329,7 @@ describe('executeProjected', () => {
       client: stub.client as never,
       tableName: 'test-table',
       audit,
+      ctx: fakeCtx,
     });
 
     expect(capturedArgs).toHaveLength(1);
@@ -313,6 +340,7 @@ describe('executeProjected', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
     const entries: TypeTableEntry[] = [
       makeTypeC('u-del-1'),
@@ -325,11 +353,45 @@ describe('executeProjected', () => {
       client: stub.client as never,
       tableName: 'test-table',
       audit,
+      ctx: fakeCtx,
     });
 
     const counts = audit.snapshot();
     expect(counts.deleted).toBe(2);
     expect(counts.reverted).toBe(0);
     expect(() => audit.assertInvariant()).not.toThrow();
+  });
+
+  // --------------------------------------------------------------------------
+  // CTX-01 retrofit contract test (Pitfall 4 / RESEARCH §A6)
+  // --------------------------------------------------------------------------
+
+  it('passes ctx as the second argument to migration.down (CTX-01 retrofit, Pitfall 4)', async () => {
+    const stub = makeRollbackStubService();
+    const migration = stub.makeMigration({ hasDown: true });
+    const audit = createRollbackAudit();
+    const fakeCtx: MigrationCtx = { entity: vi.fn() as never };
+
+    const downSpy = vi.fn(async (record: unknown, _ctx?: unknown) => {
+      const r = record as Record<string, unknown>;
+      const { status: _s, ...v1Shape } = r;
+      return v1Shape;
+    });
+    (migration as Record<string, unknown>).down = downSpy;
+
+    const entry = makeTypeA('u-ctx-check');
+
+    await executeProjected({
+      classify: makeClassifier([entry]),
+      migration: migration as never,
+      client: stub.client as never,
+      tableName: 'test-table',
+      audit,
+      ctx: fakeCtx,
+    });
+
+    expect(downSpy).toHaveBeenCalledTimes(1);
+    // The second argument must be the fakeCtx (CTX-01: down receives ctx)
+    expect(downSpy.mock.calls[0]).toEqual([expect.any(Object), fakeCtx]);
   });
 });

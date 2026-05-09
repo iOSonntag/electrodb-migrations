@@ -60,7 +60,7 @@ export async function executeFillOnly(args: ExecuteStrategyArgs): Promise<void> 
       // Type B: record exists in v2 but NOT in v1 — fill it in by running down().
       let v1Derived: unknown;
       try {
-        v1Derived = await args.migration.down!(entry.v2!);
+        v1Derived = await args.migration.down!(entry.v2!, args.ctx);
       } catch (err) {
         // down-throw bubble: RESEARCH Pattern 5 + apply-flow src/runner/apply-flow.ts:142-147
         args.audit.incrementFailed();

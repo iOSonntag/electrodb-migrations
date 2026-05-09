@@ -16,6 +16,7 @@ import { executeFillOnly } from '../../../../src/rollback/strategies/fill-only.j
 import { createRollbackAudit } from '../../../../src/rollback/audit.js';
 import { makeRollbackStubService } from '../_stub-service.js';
 import type { TypeTableEntry } from '../../../../src/rollback/type-table.js';
+import type { MigrationCtx } from '../../../../src/ctx/types.js';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -53,6 +54,16 @@ function makeTypeC(id: string): TypeTableEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Shared fake ctx (Phase 6 / CTX-01 retrofit)
+// ---------------------------------------------------------------------------
+
+function makeFakeCtx(): MigrationCtx {
+  return {
+    entity: vi.fn(() => { throw new Error('test should not call ctx.entity'); }) as never,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -61,6 +72,7 @@ describe('executeFillOnly', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
     const downSpy = vi.fn();
     (migration as Record<string, unknown>).down = downSpy;
@@ -71,6 +83,7 @@ describe('executeFillOnly', () => {
       client: stub.client as never,
       tableName: 'test-table',
       audit,
+      ctx: fakeCtx,
     });
 
     expect(downSpy.mock.calls).toHaveLength(0);
@@ -87,6 +100,7 @@ describe('executeFillOnly', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
     const downSpy = vi.fn();
     (migration as Record<string, unknown>).down = downSpy;
@@ -99,6 +113,7 @@ describe('executeFillOnly', () => {
       client: stub.client as never,
       tableName: 'test-table',
       audit,
+      ctx: fakeCtx,
     });
 
     expect(downSpy.mock.calls).toHaveLength(0);
@@ -114,8 +129,9 @@ describe('executeFillOnly', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
-    const downSpy = vi.fn(async (record: unknown) => {
+    const downSpy = vi.fn(async (record: unknown, _ctx?: unknown) => {
       const r = record as Record<string, unknown>;
       const { status: _s, ...v1Shape } = r;
       return v1Shape;
@@ -138,6 +154,7 @@ describe('executeFillOnly', () => {
       client: stub.client as never,
       tableName: 'test-table',
       audit,
+      ctx: fakeCtx,
     });
 
     // Only type B calls down()
@@ -155,8 +172,9 @@ describe('executeFillOnly', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
-    const downSpy = vi.fn(async () => {
+    const downSpy = vi.fn(async (_record?: unknown, _ctx?: unknown) => {
       throw new Error('fill-only down failed');
     });
     (migration as Record<string, unknown>).down = downSpy;
@@ -174,6 +192,7 @@ describe('executeFillOnly', () => {
         client: stub.client as never,
         tableName: 'test-table',
         audit,
+        ctx: fakeCtx,
       }),
     ).rejects.toThrow('fill-only down failed');
 
@@ -190,8 +209,9 @@ describe('executeFillOnly', () => {
     const stub = makeRollbackStubService();
     const migration = stub.makeMigration({ hasDown: true });
     const audit = createRollbackAudit();
+    const fakeCtx = makeFakeCtx();
 
-    const downSpy = vi.fn(async (record: unknown) => {
+    const downSpy = vi.fn(async (record: unknown, _ctx?: unknown) => {
       const r = record as Record<string, unknown>;
       const { status: _s, ...v1Shape } = r;
       return v1Shape;
@@ -214,6 +234,7 @@ describe('executeFillOnly', () => {
       client: stub.client as never,
       tableName: 'test-table',
       audit,
+      ctx: fakeCtx,
     });
 
     // down() should only be called for type B records
@@ -222,5 +243,38 @@ describe('executeFillOnly', () => {
     expect(counts.skipped).toBe(4); // 2 A + 2 C
     expect(counts.reverted).toBe(bCount);
     expect(() => audit.assertInvariant()).not.toThrow();
+  });
+
+  // --------------------------------------------------------------------------
+  // CTX-01 retrofit contract test (Pitfall 4 / RESEARCH §A6)
+  // --------------------------------------------------------------------------
+
+  it('passes ctx as the second argument to migration.down for type B (CTX-01 retrofit, Pitfall 4)', async () => {
+    const stub = makeRollbackStubService();
+    const migration = stub.makeMigration({ hasDown: true });
+    const audit = createRollbackAudit();
+    const fakeCtx: MigrationCtx = { entity: vi.fn() as never };
+
+    const downSpy = vi.fn(async (record: unknown, _ctx?: unknown) => {
+      const r = record as Record<string, unknown>;
+      const { status: _s, ...v1Shape } = r;
+      return v1Shape;
+    });
+    (migration as Record<string, unknown>).down = downSpy;
+
+    const entry = makeTypeB('u-ctx-check');
+
+    await executeFillOnly({
+      classify: makeClassifier([entry]),
+      migration: migration as never,
+      client: stub.client as never,
+      tableName: 'test-table',
+      audit,
+      ctx: fakeCtx,
+    });
+
+    expect(downSpy).toHaveBeenCalledTimes(1);
+    // The second argument must be the fakeCtx (CTX-01: down receives ctx)
+    expect(downSpy.mock.calls[0]).toEqual([expect.any(Object), fakeCtx]);
   });
 });
