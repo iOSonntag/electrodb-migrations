@@ -21,7 +21,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { classifyTypeTable } from '../../../src/rollback/type-table.js';
+import { classifyTypeTable, type TypeTableEntry } from '../../../src/rollback/type-table.js';
 import { isDdbLocalReachable, skipMessage } from '../_helpers/docker-availability.js';
 import { setupRollbackTestTable, type RollbackTestTableSetup } from './_helpers.js';
 
@@ -61,7 +61,7 @@ describe('RBK-11 — STD safety: classifyTypeTable does not emit Team records', 
       return;
     }
 
-    const entries: Awaited<ReturnType<typeof classifyTypeTable extends AsyncGenerator<infer T> ? () => T : never>>[] = [];
+    const entries: TypeTableEntry[] = [];
     for await (const entry of classifyTypeTable({ migration: setup.migration })) {
       entries.push(entry);
     }
@@ -79,7 +79,7 @@ describe('RBK-11 — STD safety: classifyTypeTable does not emit Team records', 
       return;
     }
 
-    const entries: Awaited<ReturnType<typeof classifyTypeTable extends AsyncGenerator<infer T> ? () => T : never>>[] = [];
+    const entries: TypeTableEntry[] = [];
     for await (const entry of classifyTypeTable({ migration: setup.migration })) {
       entries.push(entry);
     }
