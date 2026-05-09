@@ -36,6 +36,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createMigrationsClient } from '../../../src/client/index.js';
 import { runUnguarded } from '../../../src/guard/index.js';
+import type { AnyElectroEntity } from '../../../src/migrations/types.js';
 import { isDdbLocalReachable, skipMessage } from '../_helpers/index.js';
 import { type ApplyTestTableSetup, setupApplyTestTable } from './_helpers.js';
 
@@ -111,12 +112,18 @@ interface AuditRowShapeCase {
    *
    * The return type is `setup.migration & {...}` because the full-feature
    * variant adds three optional fields that the bare fixture omits; the
-   * intersection is widened just enough to admit both shapes.
+   * intersection is widened just enough to admit both shapes. Each optional
+   * field mirrors the framework contract on `Migration` at
+   * `src/migrations/types.ts` exactly (rather than a looser `unknown`-leaning
+   * shape). Typing `reads` as `ReadonlyArray<AnyElectroEntity>` rather than
+   * `ReadonlyArray<unknown>` ensures a future refactor that passes
+   * non-entities here fails at type-check time instead of crashing at runtime
+   * inside `applyFlowScanWrite`'s `.map(e => e.model.entity)` projection.
    */
   buildMigration: (setup: ApplyTestTableSetup) => ApplyTestTableSetup['migration'] & {
     down?: (record: unknown, ctx?: unknown) => Promise<unknown>;
     rollbackResolver?: (...args: unknown[]) => unknown;
-    reads?: ReadonlyArray<unknown>;
+    reads?: ReadonlyArray<AnyElectroEntity>;
   };
   /** Assert the three case-specific flag/reads shapes on the read-back row. */
   expectShape: (row: Record<string, unknown>) => void;
@@ -139,9 +146,9 @@ const cases: ReadonlyArray<AuditRowShapeCase> = [
         rollbackResolver: () => null,
         reads: [setup.v2Entity],
       }) as typeof setup.migration & {
-        down: (record: unknown) => Promise<unknown>;
-        rollbackResolver: () => null;
-        reads: ReadonlyArray<unknown>;
+        down: (record: unknown, ctx?: unknown) => Promise<unknown>;
+        rollbackResolver: (...args: unknown[]) => unknown;
+        reads: ReadonlyArray<AnyElectroEntity>;
       },
     expectShape: (r) => {
       expect(r.hasDown).toBe(true);
