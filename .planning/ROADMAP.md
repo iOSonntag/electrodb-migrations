@@ -134,7 +134,13 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. `ctx.entity(SelfEntity)` from inside its own migration throws `EDBSelfReadInMigrationError` before any DDB call; calling `ctx.entity(Y)` when on-disk Y's snapshot fingerprint does not match the imported Y throws `EDBStaleEntityReadError` with the conflicting migration named in `details`.
   4. `defineMigration({reads: [Team, Org]})` persists the entity-name set on `_migrations.reads` at apply time; re-loading the migration row from the audit log surfaces the same set without re-importing the migration source.
   5. The CTX integration tests cover the four declared/undeclared × in-bounds/out-of-bounds combinations and all pass against DynamoDB Local in under 30 seconds.
-**Plans**: TBD
+**Plans**: 6 plans across 6 waves
+  - [ ] 06-01-PLAN.md — Wave 0: spike test (entity-clone via `new Entity(schema, config)`) + 2 fixtures (User-reads-Team, User-self-read) + RED tests for CTX-01..06 + CTX-08 + ctx source-scan invariant (no `setClient` in src/ctx/) — gates Wave 1 until spike passes
+  - [ ] 06-02-PLAN.md — Wave 1: src/ctx/types.ts (MigrationCtx + ReadOnlyEntityFacade<E>) + src/ctx/read-only-facade.ts (createReadOnlyFacade with 6 read methods + 7 write traps) — CTX-02, CTX-03
+  - [ ] 06-03-PLAN.md — Wave 2: src/ctx/build-ctx.ts (eager-for-declared + lazy-for-undeclared validation) + src/ctx/index.ts barrel + apply-flow + apply-batch + client.apply cwd plumbing — CTX-01, CTX-04, CTX-05, CTX-06
+  - [ ] 06-04-PLAN.md — Wave 3: rollback orchestrator + strategy executors retrofitted to thread ctx through migration.down(record, ctx) per RESEARCH §A6 + RollbackArgs.cwd + client.rollback wiring — CTX-01 (down-side)
+  - [ ] 06-05-PLAN.md — Wave 4: ROLLBACK_REASON_CODES.READS_DEPENDENCY_APPLIED + checkPreconditions Step 10 (CTX-08) using fromVersion comparison (clock-skew safe per RESEARCH §A3) — CTX-08
+  - [ ] 06-06-PLAN.md — Wave 5: setupCtxTestTable helper + SC-5 four-cell matrix integration test (ctx-read.test.ts) + CTX-06 audit-row test + CTX-08 rollback-refusal integration test + README §6.6 update — integration coverage for all 5 phase SCs
 
 ### Phase 7: Validate, Regenerate & Acknowledge-Removal
 **Goal**: A team can run `npx electrodb-migrations validate` in CI as a pre-merge gate that catches drift-without-migration, version skew, sequence gaps, parallel-branch collisions, cross-entity ordering violations, removed entities, reserved-namespace user entities, and edited-frozen-schema files; users can resolve parallel-branch conflicts via `create --regenerate` and retire entities via `acknowledge-removal`.
