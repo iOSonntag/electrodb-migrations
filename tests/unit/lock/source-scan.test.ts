@@ -75,11 +75,11 @@ describe('source-scan invariants for src/lock/ + src/guard/ + src/runner/ + src/
     // - Plan 04-07 creates the first file under src/runner/.
     // - Plan 05-02+ create the first files under src/rollback/.
     // Once those land, the invariants apply automatically via the glob.
-    // The assertion below confirms src/rollback/ does not yet exist (Plan 05-01
-    // extends the glob but does NOT create the first src/rollback/ file — that
-    // is Plan 05-02's job). Once Plan 05-02 lands, this assertion must be
-    // removed or the glob result will include src/rollback/ files.
-    expect(files.some((f) => f.includes('src/rollback/'))).toBe(false);
+    // Plan 05-04 created the first files under src/rollback/ (audit.ts,
+    // resolver-validate.ts, batch-flush-rollback.ts). The tracker assertion
+    // that guarded the directory's absence is now flipped to confirm its
+    // presence — the invariants apply automatically via the glob.
+    expect(files.some((f) => f.includes('src/rollback/'))).toBe(true);
     for (const file of files) {
       const stripped = stripCommentLines(readFileSync(file, 'utf8'));
       expect(stripped, `setInterval found in ${file}`).not.toMatch(/\bsetInterval\s*\(/);
