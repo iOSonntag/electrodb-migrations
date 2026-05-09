@@ -94,11 +94,76 @@ function normalizeReads(value: unknown): string[] | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Suite 1 — full-feature migration: hasDown / hasRollbackResolver / reads
-// must all be present on the audit row.
+// Suite cases — full-feature and bare migration share identical
+// beforeAll/afterAll/spy/runUnguarded plumbing; only the inline migration
+// construction and the three flag-shape assertions differ. `describe.each`
+// consolidates the wiring so a future maintainer who needs to update the
+// suppression / skip / runUnguarded pattern (e.g. to also suppress stdout, or
+// to call `release()` between apply and cleanup) edits exactly one place.
 // ---------------------------------------------------------------------------
 
-describe('BL-01 gap closure: full-feature migration audit-row shape', () => {
+interface AuditRowShapeCase {
+  /** Sub-suite label rendered into the describe.each title via $label. */
+  label: string;
+  /**
+   * Build the migration to apply. Must return a migration whose `id` is unique
+   * to the case so the audit-row read-back is unambiguous.
+   *
+   * The return type is `setup.migration & {...}` because the full-feature
+   * variant adds three optional fields that the bare fixture omits; the
+   * intersection is widened just enough to admit both shapes.
+   */
+  buildMigration: (setup: ApplyTestTableSetup) => ApplyTestTableSetup['migration'] & {
+    down?: (record: unknown, ctx?: unknown) => Promise<unknown>;
+    rollbackResolver?: (...args: unknown[]) => unknown;
+    reads?: ReadonlyArray<unknown>;
+  };
+  /** Assert the three case-specific flag/reads shapes on the read-back row. */
+  expectShape: (row: Record<string, unknown>) => void;
+}
+
+const cases: ReadonlyArray<AuditRowShapeCase> = [
+  {
+    label: 'full-feature migration',
+    buildMigration: (setup) =>
+      ({
+        ...setup.migration,
+        id: 'gap-04-15-User-add-status-full',
+        down: async (record: unknown) => {
+          // Strip `status` on revert. Body is irrelevant — presence is what's
+          // tested (sets `migration.down !== undefined` so the conditional
+          // spread emits `hasDown: true`).
+          const { status: _status, ...rest } = record as Record<string, unknown>;
+          return rest;
+        },
+        rollbackResolver: () => null,
+        reads: [setup.v2Entity],
+      }) as typeof setup.migration & {
+        down: (record: unknown) => Promise<unknown>;
+        rollbackResolver: () => null;
+        reads: ReadonlyArray<unknown>;
+      },
+    expectShape: (r) => {
+      expect(r.hasDown).toBe(true);
+      expect(r.hasRollbackResolver).toBe(true);
+      expect(normalizeReads(r.reads)).toEqual(['User']);
+    },
+  },
+  {
+    label: 'bare migration',
+    // setup.migration as-shipped has no `down`, no `rollbackResolver`, no
+    // `reads` — exercises the FALSE branch of all three conditional spreads
+    // in applyFlowScanWrite's put().
+    buildMigration: (setup) => setup.migration,
+    expectShape: (r) => {
+      expect(r.hasDown).toBeUndefined();
+      expect(r.hasRollbackResolver).toBeUndefined();
+      expect(normalizeReads(r.reads)).toBeUndefined();
+    },
+  },
+];
+
+describe.each(cases)('BL-01 gap closure: $label audit-row shape', ({ buildMigration, expectShape }) => {
   let alive = false;
   let setup: ApplyTestTableSetup;
 
@@ -118,7 +183,7 @@ describe('BL-01 gap closure: full-feature migration audit-row shape', () => {
     }
   });
 
-  it("writes _migrations row with fingerprint='', kind='transform', hasDown/hasRollbackResolver/reads populated", async () => {
+  it("writes _migrations row with fingerprint='', kind='transform', and the case-specific hasDown/hasRollbackResolver/reads shape", async () => {
     if (!alive) {
       console.warn(skipMessage());
       return;
@@ -128,112 +193,32 @@ describe('BL-01 gap closure: full-feature migration audit-row shape', () => {
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     try {
-      // Build the full-feature migration INLINE: spread the bare fixture and
-      // add the three optional fields. Distinct id keeps the audit row
-      // unambiguous for trace clarity. `reads: [setup.v2Entity]` declares one
-      // cross-entity read whose `model.entity === 'User'`.
-      const fullFeatureMigration = {
-        ...setup.migration,
-        id: 'gap-04-15-User-add-status-full',
-        down: async (record: unknown) => {
-          // Strip `status` on revert. Body is irrelevant — presence is what's
-          // tested (sets `migration.down !== undefined` so the conditional
-          // spread emits `hasDown: true`).
-          const { status: _status, ...rest } = record as Record<string, unknown>;
-          return rest;
-        },
-        rollbackResolver: () => null,
-        reads: [setup.v2Entity],
-      } as typeof setup.migration & {
-        down: (record: unknown) => Promise<unknown>;
-        rollbackResolver: () => null;
-        reads: ReadonlyArray<unknown>;
+      const migration = buildMigration(setup);
+
+      const client = createMigrationsClient({
+        config: testConfig,
+        client: setup.doc,
+        tableName: setup.tableName,
+        migrations: [migration],
+      });
+
+      const result = await client.apply();
+      expect(result.applied).toHaveLength(1);
+      expect(result.applied[0]?.migId).toBe(migration.id);
+
+      const row = (await runUnguarded(() => setup.service.migrations.get({ id: migration.id }).go())) as {
+        data: Record<string, unknown> | null;
       };
 
-      const client = createMigrationsClient({
-        config: testConfig,
-        client: setup.doc,
-        tableName: setup.tableName,
-        migrations: [fullFeatureMigration],
-      });
-
-      const result = await client.apply();
-      expect(result.applied).toHaveLength(1);
-      expect(result.applied[0]?.migId).toBe(fullFeatureMigration.id);
-
-      const row = (await runUnguarded(() => setup.service.migrations.get({ id: fullFeatureMigration.id }).go())) as { data: Record<string, unknown> | null };
-
       expect(row.data).not.toBeNull();
       const r = row.data as Record<string, unknown>;
 
-      // BL-01 audit-row shape — full-feature case.
+      // BL-01 audit-row shape — invariant fields shared by both cases.
       expect(r.fingerprint).toBe('');
       expect(r.kind).toBe('transform');
-      expect(r.hasDown).toBe(true);
-      expect(r.hasRollbackResolver).toBe(true);
-      expect(normalizeReads(r.reads)).toEqual(['User']);
-    } finally {
-      stderrSpy.mockRestore();
-    }
-  }, 60_000);
-});
 
-// ---------------------------------------------------------------------------
-// Suite 2 — bare migration: hasDown / hasRollbackResolver / reads must all
-// be ABSENT on the audit row (conditional spreads skipped).
-// ---------------------------------------------------------------------------
-
-describe('BL-01 gap closure: bare migration audit-row shape', () => {
-  let alive = false;
-  let setup: ApplyTestTableSetup;
-
-  beforeAll(async () => {
-    alive = await isDdbLocalReachable();
-    if (alive) {
-      setup = await setupApplyTestTable({ recordCount: 5 });
-    }
-  }, 60_000);
-
-  afterAll(async () => {
-    if (alive && setup) {
-      await runUnguarded(() => setup.cleanup());
-    }
-  });
-
-  it("writes _migrations row with fingerprint='', kind='transform', and hasDown/hasRollbackResolver/reads ABSENT (conditional spreads skipped)", async () => {
-    if (!alive) {
-      console.warn(skipMessage());
-      return;
-    }
-
-    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-
-    try {
-      // setup.migration as-shipped has no `down`, no `rollbackResolver`, no
-      // `reads` — exercises the FALSE branch of all three conditional spreads
-      // in applyFlowScanWrite's put().
-      const client = createMigrationsClient({
-        config: testConfig,
-        client: setup.doc,
-        tableName: setup.tableName,
-        migrations: [setup.migration],
-      });
-
-      const result = await client.apply();
-      expect(result.applied).toHaveLength(1);
-      expect(result.applied[0]?.migId).toBe(setup.migration.id);
-
-      const row = (await runUnguarded(() => setup.service.migrations.get({ id: setup.migration.id }).go())) as { data: Record<string, unknown> | null };
-
-      expect(row.data).not.toBeNull();
-      const r = row.data as Record<string, unknown>;
-
-      // BL-01 audit-row shape — bare case.
-      expect(r.fingerprint).toBe('');
-      expect(r.kind).toBe('transform');
-      expect(r.hasDown).toBeUndefined();
-      expect(r.hasRollbackResolver).toBeUndefined();
-      expect(normalizeReads(r.reads)).toBeUndefined();
+      // Case-specific flag/reads shape.
+      expectShape(r);
     } finally {
       stderrSpy.mockRestore();
     }
