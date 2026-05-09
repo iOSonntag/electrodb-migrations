@@ -119,9 +119,8 @@ export async function batchFlushRollback(args: RollbackBatchArgs): Promise<Batch
       write: async (batch) => {
         const res = (await args.client.send(
           new BatchWriteCommand({
-            RequestItems: {
-              [args.tableName]: batch as Array<{ PutRequest?: unknown; DeleteRequest?: unknown }>,
-            },
+            // biome-ignore lint/suspicious/noExplicitAny: heterogeneous Put+Delete BatchRequest array; AWS SDK types are overly strict
+            RequestItems: { [args.tableName]: batch as any[] },
           }),
         )) as {
           UnprocessedItems?: Record<
